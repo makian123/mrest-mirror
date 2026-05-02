@@ -33,6 +33,7 @@ class Server: public Observer {
 	void Stop();
 
 	void Send(int connectionId, const char *data, std::size_t size);
+	void Disconnect(int connectionId);
 
 	void OnReceived(int connectionId, const char *data, const std::size_t size) override;
 };

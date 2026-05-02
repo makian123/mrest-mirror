@@ -31,19 +31,16 @@ void to_json(nlohmann::json &json, const TmpStruct &obj){
 int main() {
 	asio::io_context io_context;
 	Server serv{io_context, "127.0.0.1", 8110};
-	serv.controllers.AddController<Controller>();
 	serv.AddFilter([](HttpRequest &request){
 		if(request.header.path.starts_with("/api")){
 			return false;
 		}
-
+		
 		return true;
 	});
-	serv.controllers.AddHandler("/user/register", std::function<TmpStruct()>([](){
-		std::println("Registration attempted");
-		return TmpStruct{};
-	}));
-
+	
+	serv.controllers.AddController<Controller>();
+	
 	serv.Start();
 	while(true){
 		io_context.run();

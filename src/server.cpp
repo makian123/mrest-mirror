@@ -37,8 +37,8 @@ void Server::DoAccept() {
 			return;
 		}
 
-		std::shared_ptr<TcpConnection> connection{
-			TcpConnection::create(std::move(socket), *this, connections.size())};
+		std::shared_ptr<TcpConnection> connection{TcpConnection::create(
+			std::move(socket), *this, connections.size())};
 		connection->startReading();
 		connections.insert({connections.size(), std::move(connection)});
 
@@ -60,26 +60,50 @@ void Server::Send(int connectionId, const char *data, std::size_t size) {
 		it->second->send(data, size);
 	}
 }
+void Server::Disconnect(int connectionId) {
+	auto it = std::find_if(
+		connections.begin(), connections.end(),
+		[connectionId](
+			const std::pair<int, std::shared_ptr<TcpConnection>> &conn) {
+			return conn.first == connectionId;
+		});
 
-void Server::OnReceived(int connectionId, const char *data, const std::size_t size){
+	if (it == connections.end()) {
+		return;
+	}
+	
+	connections.erase(it);
+}
+
+void Server::OnReceived(int connectionId, const char *data,
+						const std::size_t size) {
 	HttpRequest request{std::string(data, data + size)};
 
-	if(!filter.Filter(request)){
-		std::println("Denied access");
-	}
-	else{
+	if (filter.Filter(request)) {
 		auto handler = controllers.GetPathHandler(request.header.path);
-		if(!handler){
+		if (!handler) {
 			std::println("Denied access");
 			return;
 		}
 
-		try{
+		try {
 			auto value = (*handler)(request);
-			std::println("{}", value);
-		}
-		catch(std::exception &e){
-			std::println("Bad request");
+			HttpHeader headers;
+			headers.statusCode = "200 OK";
+
+			HttpRequest request;
+			request.header = headers;
+			if (!value.empty()) {
+				request.body = value;
+			}
+
+			std::string stringified = request.Stringify();
+			Send(connectionId, stringified.c_str(), stringified.size());
+		} catch (std::exception &e) {
 		}
 	}
+
+	std::string stringified = HttpRequest::BadRequest().Stringify();
+	Send(connectionId, stringified.c_str(), stringified.size());
+	Disconnect(connectionId);
 }
