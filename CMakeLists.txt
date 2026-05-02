@@ -13,6 +13,8 @@ FetchContent_Declare(
     GIT_TAG v3.4.0
 )
 FetchContent_MakeAvailable(tomlplusplus)
+
+# TODO: use a reflection json library
 FetchContent_Declare(
     nlohmann
     GIT_REPOSITORY https://github.com/nlohmann/json.git
@@ -24,5 +26,10 @@ add_library(asio INTERFACE)
 target_include_directories(asio INTERFACE ${CMAKE_SOURCE_DIR}/deps/asio-1.36.0/include)
 target_link_libraries(asio INTERFACE pthread)
 
+option(USE_EXAMPLE "Compile example subproject" ON)
+
 add_subdirectory(src)
-add_subdirectory(example)
+
+if(USE_EXAMPLE)
+    add_subdirectory(example)
+endif()

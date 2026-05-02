@@ -39,9 +39,9 @@ class ControllerManager {
 				template for(constexpr auto annotation: std::define_static_array(annotations_of(func))){
 					if constexpr(SameAnnotation<Request>(annotation)){
 						constexpr auto req = constant_of(annotation);
-						RouteHandler handler{req.method, req.route};
+						RouteMetadata metadata{req.method, req.route};
 
-						routes.back()[handler] = 
+						routes.back()[metadata] = CreateHandler(req.method, req.route, &[:(*stored_ptr)::func:]);
 					}
 				}
 			}
@@ -85,10 +85,10 @@ class ControllerManager {
 	bool MatchRoute(std::string_view pattern, std::string_view path) const;
 
 	template <typename R, typename... Args>
-	void AddHandler(std::size_t controllerIdx, std::string_view requestMethod, 
+	RouteHandler CreateHandler(std::string_view requestMethod, 
 					std::string_view requestPattern,
 					std::function<R(Args...)> method) {
-		routes.at(controllerIdx)[std::make_pair(std::string{requestMethod}, std::string{requestPattern})] = [method](HttpRequest &request) {
+		return [method](HttpRequest &request) {
 			std::optional<std::tuple<Args &...>> ref;
 
 			auto set = [&]<auto I>(auto &e) {
@@ -120,6 +120,7 @@ class ControllerManager {
 				} else if constexpr (HasToString<R>) {
 					return std::to_string(retVal);
 				} else {
+					// TODO: use reflection serialization lib 
 					return nlohmann::json(retVal).dump();
 				}
 			}
