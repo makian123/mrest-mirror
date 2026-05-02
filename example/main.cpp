@@ -6,6 +6,8 @@
 #include "request_interceptor.hpp"
 #include "server.hpp"
 
+#include <annotations/request.hpp>
+
 #include <asio.hpp>
 
 #include <print>
@@ -15,6 +17,11 @@ class Controller {
 
 	public:
 	Controller() = default;
+
+	[[=GetRequest("/api")]]
+	void TestRequest(){
+		std::println("Api called");
+	}
 };
 
 struct TmpStruct{
@@ -22,11 +29,6 @@ struct TmpStruct{
 	int val2 = 1515;
 	std::string yooo = "asdfg";
 };
-void to_json(nlohmann::json &json, const TmpStruct &obj){
-	json["val1"] = obj.val1;
-	json["val2"] = obj.val2;
-	json["yooo"] = obj.yooo;
-}
 
 int main() {
 	asio::io_context io_context;
