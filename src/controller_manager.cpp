@@ -51,15 +51,18 @@ bool ControllerManager::MatchRoute(std::string_view pattern,
 	return true;
 }
 std::optional<RouteHandler> ControllerManager::GetPathHandler(
-	std::string_view query) const {
-	auto routeFound = std::find_if(
-		routes.begin(), routes.end(),
-		[query, this](const std::pair<std::string, RouteHandler> &route) {
-			return MatchRoute(query, route.first);
-		});
-
-	if (routeFound != routes.end()) {
-		return routeFound->second;
+	std::string_view method, std::string_view query) const {
+	for (auto &controllerHandler : routes) {
+		auto routeFound = std::find_if(
+			controllerHandler.begin(), controllerHandler.end(),
+			[method, query, this](
+				const std::pair<RouteMetadata, RouteHandler>
+					&route) {
+				return route.first.first == method && route.first.second == query;
+			});
+		if (routeFound != controllerHandler.end()) {
+			return routeFound->second;
+		}
 	}
 	return std::nullopt;
 }

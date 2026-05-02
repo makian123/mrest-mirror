@@ -1,13 +1,13 @@
 #pragma once
 
-#include <string_view>
+#include "util/reflection.hpp"
 
 struct RequestBody {};
 
 struct RequestParam {
-    std::string_view name;
+    StringLiteral name;
 };
 
 struct PathVariable {
-    std::string_view name;
+    StringLiteral name;
 };

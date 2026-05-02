@@ -80,7 +80,7 @@ void Server::OnReceived(int connectionId, const char *data,
 	HttpRequest request{std::string(data, data + size)};
 
 	if (filter.Filter(request)) {
-		auto handler = controllers.GetPathHandler(request.header.path);
+		auto handler = controllers.GetPathHandler(request.header.method, request.header.path);
 		if (!handler) {
 			std::println("Denied access");
 			return;

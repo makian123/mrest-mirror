@@ -1,26 +1,34 @@
 #include <nlohmann/json_fwd.hpp>
 #include <toml++/toml.hpp>
 
+#include "annotations/parameters.hpp"
 #include "asio/io_context.hpp"
 #include "request.hpp"
 #include "request_interceptor.hpp"
 #include "server.hpp"
 
 #include <annotations/request.hpp>
+#include <annotations/controller.hpp>
 
 #include <asio.hpp>
 
 #include <print>
 
-class Controller {
+struct LoginRequestDto {
+	std::string username;
+	std::string password;
+};
+class [[=RestController("/public")]] Controller {
 	int test{0};
 
 	public:
 	Controller() = default;
 
-	[[=GetRequest("/api")]]
-	void TestRequest(){
-		std::println("Api called");
+	[[=PostRequest("/login")]]
+	void TestRequest([[=RequestBody{}]] const LoginRequestDto &request){
+		std::println("Login called");
+		std::println("Username: {}", request.username);
+		std::println("Password: {}", request.password);
 	}
 };
 

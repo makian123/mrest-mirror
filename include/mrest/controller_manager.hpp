@@ -4,14 +4,20 @@
 #include <any>
 #include <concepts>
 #include <functional>
+#include <glaze/glaze.hpp>
 #include <memory>
+#include <meta>
 #include <nlohmann/detail/conversions/to_json.hpp>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
+#include "annotations/controller.hpp"
+#include "annotations/request.hpp"
 #include "request.hpp"
+#include "util/reflection.hpp"
 
 template <typename T>
 concept HasToString = requires(T a) {
@@ -24,24 +30,35 @@ class ControllerManager {
 	template <typename T, typename... Args>
 	// TODO: use reflection to extract all endpoint handlers
 	T &AddController(Args &&...args) {
+		static_assert(HasAnnotation<RestController>(^^T), "Object needs to have RestController annotation");
 		// Use shared pointer for std::any's copy constructible requirement
 		auto ptr = std::make_shared<T>(std::forward<Args>(args)...);
 
 		controllers.emplace_back(std::move(ptr));
 
-		std::shared_ptr<T> &stored_ptr =
-			std::any_cast<std::shared_ptr<T> &>(controllers.back());
+		std::shared_ptr<T> &stored_ptr = std::any_cast<std::shared_ptr<T> &>(controllers.back());
 
 		routes.emplace_back();
 
-		template for(constexpr auto func: std::define_static_array(members_of(^^T, std::meta::access_context::current()))){
-			if constexpr (has_identifier(func) && HasAnnotation<Request>(func)){
-				template for(constexpr auto annotation: std::define_static_array(annotations_of(func))){
-					if constexpr(SameAnnotation<Request>(annotation)){
-						constexpr auto req = constant_of(annotation);
-						RouteMetadata metadata{req.method, req.route};
+		std::string_view literal;
+		template for(constexpr auto annotation: define_static_array(annotations_of(^^T))){
+			if constexpr(SameAnnotation<RestController>(annotation)){
+				literal = [:constant_of(annotation):].route.text;
+			}
+		}
 
-						routes.back()[metadata] = CreateHandler(req.method, req.route, &[:(*stored_ptr)::func:]);
+		template for (constexpr auto func :
+					  define_static_array(members_of(^^T, std::meta::access_context::current()))) {
+			if constexpr (has_identifier(func) && HasAnnotation<Request>(func)) {
+				template for (constexpr auto annotation :
+							  define_static_array(annotations_of(func))) {
+					if constexpr (SameAnnotation<Request>(annotation)) {
+						constexpr auto req = [:constant_of(annotation):];
+						RouteMetadata metadata = std::make_pair(std::string{req.method.text},
+																std::string{literal} + std::string{req.route.text});
+
+						routes.back()[metadata] = CreateHandler(metadata.first, metadata.second,
+																MakeFunction(*stored_ptr, &[:func:]));
 					}
 				}
 			}
@@ -52,27 +69,25 @@ class ControllerManager {
 
 	template <typename T>
 	void RemoveController(T *ptr) {
-		auto it =
-			std::find_if(controllers.begin(), controllers.end(),
-						 [ptr](const std::unique_ptr<std::any> &controller) {
-							 return controller.get() == ptr;
-						 });
+		auto it = std::find_if(
+			controllers.begin(), controllers.end(),
+			[ptr](const std::unique_ptr<std::any> &controller) { return controller.get() == ptr; });
 
 		if (it != controllers.end()) {
 			controllers.erase(it);
 		}
 	}
 
-	std::optional<RouteHandler> GetPathHandler(std::string_view query) const;
+	std::optional<RouteHandler> GetPathHandler(std::string_view method,
+											   std::string_view query) const;
 
-	private:
+   private:
 	// {"<METHOD>", "<PATH>"}
 	using RouteMetadata = std::pair<std::string, std::string>;
 	struct HashPair {
-		template<typename A, typename B>
-		std::size_t operator()(const std::pair<A, B> &pair) const {
-			const std::size_t hash1{std::hash<A>(pair.first)};
-			const std::size_t hash2{std::hash<B>(pair.second)};
+		std::size_t operator()(const RouteMetadata &pair) const {
+			const auto hash1{std::hash<std::string>{}(pair.first)};
+			const auto hash2{std::hash<std::string>{}(pair.second)};
 
 			// TODO: Better hashing of pairs
 			return std::rotl(hash1, 1) ^ hash2;
@@ -85,9 +100,8 @@ class ControllerManager {
 	bool MatchRoute(std::string_view pattern, std::string_view path) const;
 
 	template <typename R, typename... Args>
-	RouteHandler CreateHandler(std::string_view requestMethod, 
-					std::string_view requestPattern,
-					std::function<R(Args...)> method) {
+	RouteHandler CreateHandler(std::string_view requestMethod, std::string_view requestPattern,
+							   std::function<R(Args...)> method) {
 		return [method](HttpRequest &request) {
 			std::optional<std::tuple<Args &...>> ref;
 
@@ -120,12 +134,16 @@ class ControllerManager {
 				} else if constexpr (HasToString<R>) {
 					return std::to_string(retVal);
 				} else {
-					// TODO: use reflection serialization lib 
-					return nlohmann::json(retVal).dump();
+					// TODO: use reflection serialization lib
+					return glz::write_json(retVal);
 				}
 			}
 
 			return std::string{};
 		};
+	}
+	template <typename C, typename R, typename... Args>
+	std::function<R(Args...)> MakeFunction(C &obj, R (C::*mf)(Args...)) {
+		return [&obj, mf](Args... args) -> R { return (obj.*mf)(std::forward<Args>(args)...); };
 	}
 };

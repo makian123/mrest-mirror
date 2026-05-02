@@ -28,3 +28,5 @@ struct HttpRequest {
 
     static HttpRequest BadRequest();
 };
+// Possible better ways to do this
+using HttpResponse = HttpRequest;

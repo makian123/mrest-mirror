@@ -1,13 +1,14 @@
 #pragma once
 
 #include <meta>
+#include <string_view>
 
 struct StringLiteral {
 	const char *text;
 
     consteval StringLiteral(): text{nullptr} {}
 	consteval explicit StringLiteral(std::string_view inText)
-		: text(define_static_string(inText)) {}
+		: text(std::define_static_string(inText)) {}
 };
 
 template<typename A>
