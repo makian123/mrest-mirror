@@ -14,6 +14,12 @@
 
 #include <print>
 
+struct TmpStruct{
+	int val1 = 123;
+	int val2 = 1515;
+	std::string val3 = "asd";
+};
+
 struct LoginRequestDto {
 	std::string username;
 	std::string password;
@@ -25,17 +31,13 @@ class [[=RestController("/public")]] Controller {
 	Controller() = default;
 
 	[[=PostRequest("/login")]]
-	void TestRequest([[=RequestBody{}]] const LoginRequestDto &request){
+	TmpStruct TestRequest([[=RequestBody{}]] const LoginRequestDto &request){
 		std::println("Login called");
 		std::println("Username: {}", request.username);
 		std::println("Password: {}", request.password);
-	}
-};
 
-struct TmpStruct{
-	int val1 = 12;
-	int val2 = 1515;
-	std::string yooo = "asdfg";
+		return TmpStruct{};
+	}
 };
 
 int main() {

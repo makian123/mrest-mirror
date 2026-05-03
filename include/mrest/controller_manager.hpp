@@ -9,12 +9,15 @@
 #include <meta>
 #include <nlohmann/detail/conversions/to_json.hpp>
 #include <nlohmann/json.hpp>
+#include <print>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
 #include "annotations/controller.hpp"
+#include "annotations/parameters.hpp"
 #include "annotations/request.hpp"
 #include "request.hpp"
 #include "util/reflection.hpp"
@@ -30,7 +33,8 @@ class ControllerManager {
 	template <typename T, typename... Args>
 	// TODO: use reflection to extract all endpoint handlers
 	T &AddController(Args &&...args) {
-		static_assert(HasAnnotation<RestController>(^^T), "Object needs to have RestController annotation");
+		static_assert(HasAnnotation<RestController>(^^T),
+					  "Object needs to have RestController annotation");
 		// Use shared pointer for std::any's copy constructible requirement
 		auto ptr = std::make_shared<T>(std::forward<Args>(args)...);
 
@@ -41,8 +45,8 @@ class ControllerManager {
 		routes.emplace_back();
 
 		std::string_view literal;
-		template for(constexpr auto annotation: define_static_array(annotations_of(^^T))){
-			if constexpr(SameAnnotation<RestController>(annotation)){
+		template for (constexpr auto annotation : define_static_array(annotations_of(^^T))) {
+			if constexpr (SameAnnotation<RestController>(annotation)) {
 				literal = [:constant_of(annotation):].route.text;
 			}
 		}
@@ -53,12 +57,33 @@ class ControllerManager {
 				template for (constexpr auto annotation :
 							  define_static_array(annotations_of(func))) {
 					if constexpr (SameAnnotation<Request>(annotation)) {
-						constexpr auto req = [:constant_of(annotation):];
-						RouteMetadata metadata = std::make_pair(std::string{req.method.text},
-																std::string{literal} + std::string{req.route.text});
+						std::unordered_map<std::string, int> queryIndices;
+						std::unordered_map<std::string, int> pathVariables;
+						constexpr int bodyIdx = AnnotationPos<RequestBody>(parameters_of(func));
 
-						routes.back()[metadata] = CreateHandler(metadata.first, metadata.second,
-																MakeFunction(*stored_ptr, &[:func:]));
+						constexpr auto params = define_static_array(parameters_of(func));
+						template for (constexpr auto idx :
+									  make_index_array(std::make_index_sequence<params.size()>{})) {
+							if constexpr (HasAnnotation<RequestParam>(params[idx])) {
+								template for (constexpr auto paramAnnotation :
+											  define_static_array(annotations_of(params[idx]))) {
+									if constexpr (SameAnnotation<RequestParam>(paramAnnotation)) {
+										queryIndices.emplace(
+											std::string{[:constant_of(paramAnnotation):].name.text},
+											idx);
+									}
+								}
+							}
+						}
+
+						constexpr auto req = [:constant_of(annotation):];
+						RouteMetadata metadata =
+							std::make_pair(std::string{req.method.text},
+										   std::string{literal} + std::string{req.route.text});
+
+						routes.back()[metadata] = CreateHandler(
+							metadata.first, metadata.second, MakeFunction(*stored_ptr, &[:func:]),
+							queryIndices, pathVariables, bodyIdx);
 					}
 				}
 			}
@@ -101,9 +126,12 @@ class ControllerManager {
 
 	template <typename R, typename... Args>
 	RouteHandler CreateHandler(std::string_view requestMethod, std::string_view requestPattern,
-							   std::function<R(Args...)> method) {
-		return [method](HttpRequest &request) {
-			std::optional<std::tuple<Args &...>> ref;
+							   std::function<R(Args...)> method,
+							   const std::unordered_map<std::string, int> &queryIndices,
+							   const std::unordered_map<std::string, int> &pathVariables,
+							   int bodyIdx) {
+		return [=](HttpRequest &request) {
+			std::optional<std::tuple<std::remove_cvref_t<Args>...>> ref;
 
 			auto set = [&]<auto I>(auto &e) {
 				ref.emplace([&]<auto... idx>(std::index_sequence<idx...>) {
@@ -117,6 +145,36 @@ class ControllerManager {
 				}(std::index_sequence_for<Args...>()));
 			};
 
+			// Pre-process the request
+			if constexpr (sizeof...(Args) > 0) {
+				template for (constexpr auto idx :
+							  make_index_array(std::make_index_sequence<sizeof...(Args)>{})) {
+					if (bodyIdx == idx) {
+						auto body =
+							glz::read_json<std::remove_cvref_t<Args...[idx]>>(request.body).value();
+						set.template operator()<idx>(body);
+						continue;
+					}
+
+					auto queryIt = std::find_if(queryIndices.begin(), queryIndices.end(),
+												[](const std::pair<std::string, int> &query) {
+													return query.second == idx;
+												});
+					if (queryIt != queryIndices.end()) {
+						if constexpr (std::is_convertible_v<std::remove_cvref_t<Args...[idx]>,
+															std::string>) {
+							set.template operator()<idx>(request.header.parameters[queryIt->first]);
+						} else if constexpr (std::is_fundamental_v<
+												 std::remove_cvref_t<Args...[idx]>>) {
+							set.template operator()<idx>(
+								std::stoull(request.header.parameters[queryIt->first]));
+						}
+						continue;
+					}
+				}
+			}
+
+			// Call handler and return
 			if constexpr (std::is_same_v<void, R>) {
 				if constexpr (sizeof...(Args) > 0)
 					std::apply(method, *ref);
@@ -135,7 +193,7 @@ class ControllerManager {
 					return std::to_string(retVal);
 				} else {
 					// TODO: use reflection serialization lib
-					return glz::write_json(retVal);
+					return glz::write_json(retVal).value();
 				}
 			}
 
@@ -143,7 +201,12 @@ class ControllerManager {
 		};
 	}
 	template <typename C, typename R, typename... Args>
-	std::function<R(Args...)> MakeFunction(C &obj, R (C::*mf)(Args...)) {
+	static std::function<R(Args...)> MakeFunction(C &obj, R (C::*mf)(Args...)) {
 		return [&obj, mf](Args... args) -> R { return (obj.*mf)(std::forward<Args>(args)...); };
+	}
+
+	template <std::size_t... I>
+	static constexpr auto make_index_array(std::index_sequence<I...>) {
+		return std::array{I...};
 	}
 };

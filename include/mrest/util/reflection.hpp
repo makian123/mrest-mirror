@@ -25,3 +25,12 @@ template<typename A>
 consteval bool SameAnnotation(std::meta::info annotation){
     return is_convertible_type(type_of(annotation), ^^A);
 }
+template<typename A>
+consteval int AnnotationPos(std::vector<std::meta::info> annotations){
+    for(std::size_t i = 0; i < annotations.size(); ++i){
+        if(HasAnnotation<A>(annotations[i])){
+            return i;
+        }
+    }
+    return -1;
+}
