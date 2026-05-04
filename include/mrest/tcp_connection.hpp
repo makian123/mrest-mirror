@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <memory>
 #include <mutex>
+#include "asio/io_context.hpp"
 #include "asio/ip/tcp.hpp"
 #include "asio/streambuf.hpp"
 #include "observer.hpp"

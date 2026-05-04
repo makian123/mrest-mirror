@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <any>
 #include <concepts>
+#include <exceptions/exceptions.hpp>
 #include <functional>
 #include <glaze/glaze.hpp>
 #include <memory>
@@ -20,6 +21,7 @@
 #include "annotations/parameters.hpp"
 #include "annotations/request.hpp"
 #include <exceptions/exceptions.hpp>
+#include "asio/awaitable.hpp"
 #include "request.hpp"
 #include "util/reflection.hpp"
 
@@ -29,7 +31,7 @@ concept HasToString = requires(T a) {
 };
 class ControllerManager {
    public:
-	using RouteHandler = std::function<HttpResponse::BodyInfo(HttpRequest &)>;
+	using RouteHandler = std::function<asio::awaitable<HttpResponse::BodyInfo>(HttpRequest &)>;
 
 	template <typename T, typename... Args>
 	// TODO: use reflection to extract all endpoint handlers
@@ -66,16 +68,12 @@ class ControllerManager {
 						constexpr auto params = define_static_array(parameters_of(func));
 						template for (constexpr auto idx :
 									  make_index_array(std::make_index_sequence<params.size()>{})) {
-							if constexpr (HasAnnotation<RequestParam>(params[idx]) || HasAnnotation<PathVariable>(params[idx])) {
+							if constexpr (HasAnnotation<RequestParam>(params[idx]) ||
+										  HasAnnotation<PathVariable>(params[idx])) {
 								template for (constexpr auto paramAnnotation :
 											  define_static_array(annotations_of(params[idx]))) {
 									if constexpr (SameAnnotation<RequestParam>(paramAnnotation)) {
 										queryIndices.emplace(
-											std::string{[:constant_of(paramAnnotation):].name.text},
-											idx);
-									}
-									else if constexpr (SameAnnotation<PathVariable>(paramAnnotation)) {
-										pathVariables.emplace(
 											std::string{[:constant_of(paramAnnotation):].name.text},
 											idx);
 									}
@@ -133,20 +131,26 @@ class ControllerManager {
 
 	bool MatchRoute(std::string_view pattern, std::string_view path) const;
 
+	template <typename T>
+	struct is_awaitable : std::false_type {};
+
+	template <typename T>
+	struct is_awaitable<asio::awaitable<T>> : std::true_type {};
+
 	template <typename R, typename... Args>
+		requires is_awaitable<R>::value
 	RouteHandler CreateHandler(std::string_view requestMethod, const std::string &requestPattern,
 							   std::function<R(Args...)> method,
 							   const std::unordered_map<std::string, int> &queryIndices,
 							   const std::unordered_map<std::string, int> &pathVariables,
 							   int bodyIdx) {
-								std::string pattern{requestPattern};
-		return [=](HttpRequest &request) {
+		std::string pattern{requestPattern};
+		return [=](HttpRequest &request) -> asio::awaitable<HttpResponse::BodyInfo> {
+			using RetType = R::value_type;
 			// TODO: remove forced default initialization
 			std::tuple<std::remove_cvref_t<Args>...> ref{};
 
-			auto set = [&]<auto I>(auto &e){
-				std::get<I>(ref) = std::forward<decltype(e)>(e);
-			};
+			auto set = [&]<auto I>(auto &e) { std::get<I>(ref) = std::forward<decltype(e)>(e); };
 
 			// Pre-process the request
 			if constexpr (sizeof...(Args) > 0) {
@@ -182,8 +186,9 @@ class ControllerManager {
 											   });
 					if (pVarIt != pathVariables.end()) {
 						auto pathVarNumber = std::distance(pathVariables.begin(), pVarIt);
-						auto extractedPathVar = ExtractPathVariable(pattern, request.header.path, pathVarNumber);
-						if(!extractedPathVar){
+						auto extractedPathVar =
+							ExtractPathVariable(pattern, request.header.path, pathVarNumber);
+						if (!extractedPathVar) {
 							throw BadRequestException("Could not extract path variable");
 						}
 						if constexpr (std::is_convertible_v<std::remove_cvref_t<Args...[idx]>,
@@ -199,31 +204,31 @@ class ControllerManager {
 			}
 
 			// Call handler and return
-			if constexpr (std::is_same_v<void, R>) {
+			if constexpr (std::is_same_v<void, RetType>) {
 				if constexpr (sizeof...(Args) > 0)
-					std::apply(method, ref);
+					co_await std::apply(method, ref);
 				else
-					method();
+					co_await method();
 			} else {
-				R retVal{};
+				RetType retVal{};
 				if constexpr (sizeof...(Args) > 0)
-					retVal = std::apply(method, ref);
+					retVal = co_await std::apply(method, ref);
 				else
-					retVal = method();
+					retVal = co_await method();
 
-				if constexpr (std::is_convertible_v<R, std::string>) {
-					return HttpResponse::BodyInfo{std::string{retVal},
-												  HttpResponse::BodyInfo::Type::PlainText};
-				} else if constexpr (HasToString<R>) {
-					return HttpResponse::BodyInfo{std::to_string(retVal),
-												  HttpResponse::BodyInfo::Type::PlainText};
+				if constexpr (std::is_convertible_v<RetType, std::string>) {
+					co_return HttpResponse::BodyInfo{std::string{retVal},
+													 HttpResponse::BodyInfo::Type::PlainText};
+				} else if constexpr (HasToString<RetType>) {
+					co_return HttpResponse::BodyInfo{std::to_string(retVal),
+													 HttpResponse::BodyInfo::Type::PlainText};
 				} else {
-					return HttpResponse::BodyInfo{glz::write_json(retVal).value(),
-												  HttpResponse::BodyInfo::Type::JSON};
+					co_return HttpResponse::BodyInfo{glz::write_json(retVal).value(),
+													 HttpResponse::BodyInfo::Type::JSON};
 				}
 			}
 
-			return HttpResponse::BodyInfo{};
+			co_return HttpResponse::BodyInfo{};
 		};
 	}
 	template <typename C, typename R, typename... Args>

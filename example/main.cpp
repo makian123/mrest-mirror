@@ -7,6 +7,7 @@
 #include <toml++/toml.hpp>
 
 #include "annotations/parameters.hpp"
+#include "asio/awaitable.hpp"
 #include "asio/io_context.hpp"
 #include "exceptions/bad_request.hpp"
 #include "request.hpp"
@@ -30,14 +31,14 @@ class[[=RestController("/public")]] Controller {
 	Controller() = default;
 
 	[[=GetRequest("/info")]]
-	std::string UserInfo([[=RequestParam("username")]] std::string username) {
+	asio::awaitable<std::string> UserInfo([[=RequestParam("username")]] std::string username) {
 		if(!users.contains(username)){
 			throw BadRequestException("User not found");
 		}
-		return users[username];
+		co_return users[username];
 	}
 	[[=GetRequest("/info/{username}")]]
-	std::string PathUserInfo([[=RequestBody]] const AuthRequestDto &body, 
+	asio::awaitable<std::string> PathUserInfo([[=RequestBody]] const AuthRequestDto &body, 
 		[[=PathVariable("username")]] const std::string &username, 
 		[[=RequestParam("token")]] const std::string &token) {
 		if(!users.contains(username)){
@@ -51,11 +52,11 @@ class[[=RestController("/public")]] Controller {
 		glz::write_json(body, bodyJson);
 		std::println("Body: {}", bodyJson);
 		std::println("Token: {}", token);
-		return users[username];
+		co_return users[username];
 	}
 
 	[[=PostRequest("/login")]]
-	TmpStruct TestRequest([[=RequestBody]] const AuthRequestDto &request) {
+	asio::awaitable<TmpStruct> TestRequest([[=RequestBody]] const AuthRequestDto &request) {
 		auto userIt = std::find_if(users.begin(), users.end(),
 								   [&request](const std::pair<std::string, std::string> &usrInfo) {
 									   return usrInfo.first == request.username &&
@@ -66,21 +67,22 @@ class[[=RestController("/public")]] Controller {
 			throw BadRequestException("Bad credentials");
 		}
 
-		return TmpStruct{};
+		co_return TmpStruct{};
 	}
 	[[=PostRequest("/register")]]
-	void RegisterHandler([[=RequestBody]] const AuthRequestDto &request) {
+	asio::awaitable<void> RegisterHandler([[=RequestBody]] const AuthRequestDto &request) {
 		if (users.contains(request.username)) {
 			throw BadRequestException("User exists");
 		}
 
 		users.emplace(request.username, request.password);
+		co_return;
 	}
 };
 
 int main() {
 	asio::io_context io_context;
-	Server serv{io_context, "127.0.0.1", 8110};
+	Server serv{io_context, "configuration.toml"};
 	serv.AddFilter([](HttpRequest &request) {
 		if (request.header.path.starts_with("/api")) {
 			return false;
