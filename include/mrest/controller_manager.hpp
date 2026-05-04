@@ -19,6 +19,7 @@
 #include "annotations/controller.hpp"
 #include "annotations/parameters.hpp"
 #include "annotations/request.hpp"
+#include <exceptions/exceptions.hpp>
 #include "request.hpp"
 #include "util/reflection.hpp"
 
@@ -28,7 +29,7 @@ concept HasToString = requires(T a) {
 };
 class ControllerManager {
    public:
-	using RouteHandler = std::function<std::string(HttpRequest &)>;
+	using RouteHandler = std::function<HttpResponse::BodyInfo(HttpRequest &)>;
 
 	template <typename T, typename... Args>
 	// TODO: use reflection to extract all endpoint handlers
@@ -59,16 +60,22 @@ class ControllerManager {
 					if constexpr (SameAnnotation<Request>(annotation)) {
 						std::unordered_map<std::string, int> queryIndices;
 						std::unordered_map<std::string, int> pathVariables;
-						constexpr int bodyIdx = AnnotationPos<RequestBody>(parameters_of(func));
+						constexpr int bodyIdx =
+							AnnotationPos<decltype(RequestBody)>(parameters_of(func));
 
 						constexpr auto params = define_static_array(parameters_of(func));
 						template for (constexpr auto idx :
 									  make_index_array(std::make_index_sequence<params.size()>{})) {
-							if constexpr (HasAnnotation<RequestParam>(params[idx])) {
+							if constexpr (HasAnnotation<RequestParam>(params[idx]) || HasAnnotation<PathVariable>(params[idx])) {
 								template for (constexpr auto paramAnnotation :
 											  define_static_array(annotations_of(params[idx]))) {
 									if constexpr (SameAnnotation<RequestParam>(paramAnnotation)) {
 										queryIndices.emplace(
+											std::string{[:constant_of(paramAnnotation):].name.text},
+											idx);
+									}
+									else if constexpr (SameAnnotation<PathVariable>(paramAnnotation)) {
+										pathVariables.emplace(
 											std::string{[:constant_of(paramAnnotation):].name.text},
 											idx);
 									}
@@ -99,6 +106,8 @@ class ControllerManager {
 			[ptr](const std::unique_ptr<std::any> &controller) { return controller.get() == ptr; });
 
 		if (it != controllers.end()) {
+			auto idx = std::distance(controllers.begin(), it);
+			routes.erase(routes.begin() + idx);
 			controllers.erase(it);
 		}
 	}
@@ -125,24 +134,18 @@ class ControllerManager {
 	bool MatchRoute(std::string_view pattern, std::string_view path) const;
 
 	template <typename R, typename... Args>
-	RouteHandler CreateHandler(std::string_view requestMethod, std::string_view requestPattern,
+	RouteHandler CreateHandler(std::string_view requestMethod, const std::string &requestPattern,
 							   std::function<R(Args...)> method,
 							   const std::unordered_map<std::string, int> &queryIndices,
 							   const std::unordered_map<std::string, int> &pathVariables,
 							   int bodyIdx) {
+								std::string pattern{requestPattern};
 		return [=](HttpRequest &request) {
-			std::optional<std::tuple<std::remove_cvref_t<Args>...>> ref;
+			// TODO: remove forced default initialization
+			std::tuple<std::remove_cvref_t<Args>...> ref{};
 
-			auto set = [&]<auto I>(auto &e) {
-				ref.emplace([&]<auto... idx>(std::index_sequence<idx...>) {
-					return std::tie([&]<auto CurrentIdx>() -> auto & {
-						if constexpr (I != CurrentIdx) {
-							return std::get<CurrentIdx>(*ref);
-						} else {
-							return e;
-						}
-					}.template operator()<idx>()...);
-				}(std::index_sequence_for<Args...>()));
+			auto set = [&]<auto I>(auto &e){
+				std::get<I>(ref) = std::forward<decltype(e)>(e);
 			};
 
 			// Pre-process the request
@@ -151,7 +154,8 @@ class ControllerManager {
 							  make_index_array(std::make_index_sequence<sizeof...(Args)>{})) {
 					if (bodyIdx == idx) {
 						auto body =
-							glz::read_json<std::remove_cvref_t<Args...[idx]>>(request.body).value();
+							glz::read_json<std::remove_cvref_t<Args...[idx]>>(request.body.body)
+								.value();
 						set.template operator()<idx>(body);
 						continue;
 					}
@@ -171,33 +175,55 @@ class ControllerManager {
 						}
 						continue;
 					}
+
+					auto pVarIt = std::find_if(pathVariables.begin(), pathVariables.end(),
+											   [](const std::pair<std::string, int> &pathSegment) {
+												   return pathSegment.second == idx;
+											   });
+					if (pVarIt != pathVariables.end()) {
+						auto pathVarNumber = std::distance(pathVariables.begin(), pVarIt);
+						auto extractedPathVar = ExtractPathVariable(pattern, request.header.path, pathVarNumber);
+						if(!extractedPathVar){
+							throw BadRequestException("Could not extract path variable");
+						}
+						if constexpr (std::is_convertible_v<std::remove_cvref_t<Args...[idx]>,
+															std::string>) {
+							set.template operator()<idx>(*extractedPathVar);
+						} else if constexpr (std::is_fundamental_v<
+												 std::remove_cvref_t<Args...[idx]>>) {
+							set.template operator()<idx>(std::stoull(*extractedPathVar));
+						}
+						continue;
+					}
 				}
 			}
 
 			// Call handler and return
 			if constexpr (std::is_same_v<void, R>) {
 				if constexpr (sizeof...(Args) > 0)
-					std::apply(method, *ref);
+					std::apply(method, ref);
 				else
 					method();
 			} else {
 				R retVal{};
 				if constexpr (sizeof...(Args) > 0)
-					retVal = std::apply(method, *ref);
+					retVal = std::apply(method, ref);
 				else
 					retVal = method();
 
 				if constexpr (std::is_convertible_v<R, std::string>) {
-					return std::string{retVal};
+					return HttpResponse::BodyInfo{std::string{retVal},
+												  HttpResponse::BodyInfo::Type::PlainText};
 				} else if constexpr (HasToString<R>) {
-					return std::to_string(retVal);
+					return HttpResponse::BodyInfo{std::to_string(retVal),
+												  HttpResponse::BodyInfo::Type::PlainText};
 				} else {
-					// TODO: use reflection serialization lib
-					return glz::write_json(retVal).value();
+					return HttpResponse::BodyInfo{glz::write_json(retVal).value(),
+												  HttpResponse::BodyInfo::Type::JSON};
 				}
 			}
 
-			return std::string{};
+			return HttpResponse::BodyInfo{};
 		};
 	}
 	template <typename C, typename R, typename... Args>

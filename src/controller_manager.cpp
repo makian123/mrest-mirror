@@ -58,7 +58,7 @@ std::optional<RouteHandler> ControllerManager::GetPathHandler(
 			[method, query, this](
 				const std::pair<RouteMetadata, RouteHandler>
 					&route) {
-				return route.first.first == method && route.first.second == query;
+				return route.first.first == method && MatchRoute(route.first.second, query);
 			});
 		if (routeFound != controllerHandler.end()) {
 			return routeFound->second;

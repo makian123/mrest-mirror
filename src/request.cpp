@@ -1,8 +1,15 @@
+#include <cctype>
+#include <optional>
+#include <print>
+#include <ranges>
 #include <request.hpp>
 #include <sstream>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
 
 namespace {
-std::string_view trim(std::string_view sv) {
+std::string_view Trim(std::string_view sv) {
 	size_t start = 0;
 	size_t end = sv.size();
 
@@ -11,6 +18,43 @@ std::string_view trim(std::string_view sv) {
 
 	return sv.substr(start, end - start);
 }
+std::string &ToLowercase(std::string &str) {
+	for (auto &ch : str) {
+		ch = std::tolower(ch);
+	}
+
+	return str;
+}
+std::vector<std::string_view> SplitString(std::string_view str, char delim) {
+	std::vector<std::string_view> segments;
+
+	if(str.starts_with(delim)){
+		str = str.substr(1);
+	}
+	auto it = str.find(delim);
+	while(it != std::string_view::npos){
+		segments.push_back(str.substr(0, it));
+		str = str.substr(it + 1);
+
+		it = str.find(delim);
+	}
+	if(str.size()){
+		segments.push_back(str);
+	}
+
+	return segments;
+}
+
+using BodyType = HttpRequest::BodyInfo::Type;
+const std::unordered_map<BodyType, std::string> bodyTypes{
+	{BodyType::JSON, "application/json"},
+	{BodyType::PlainText, "text/plain"},
+	{BodyType::CSS, "text/css"},
+	{BodyType::HTML, "text/html"},
+	{BodyType::Javascript, "text/javascript"},
+	{BodyType::Bytes, "application/octet-stream"}
+
+};
 }  // namespace
 
 HttpHeader::HttpHeader(const std::string &rawRequest) {
@@ -26,7 +70,7 @@ HttpHeader::HttpHeader(const std::string &rawRequest) {
 		}
 
 		if (line.empty()) {
-			break;
+			continue;
 		}
 
 		auto delimPos = line.find(':');
@@ -34,11 +78,11 @@ HttpHeader::HttpHeader(const std::string &rawRequest) {
 			continue;
 		}
 
-		auto key = trim(std::string_view(line.c_str(), delimPos));
-		auto value = trim(std::string_view(line.c_str() + delimPos + 1,
-										   line.size() - delimPos - 1));
+		std::string key{Trim(std::string_view(line.c_str(), delimPos))};
+		std::string value{
+			Trim(std::string_view(line.c_str() + delimPos + 1, line.size() - delimPos - 1))};
 
-		headers[std::string{key}] = std::string{value};
+		headers[ToLowercase(key)] = std::string{value};
 	}
 
 	// Parameter trimming
@@ -47,7 +91,7 @@ HttpHeader::HttpHeader(const std::string &rawRequest) {
 		return;
 	}
 
-	auto paramString = path.substr(paramStartIt);
+	auto paramString = path.substr(paramStartIt + 1);
 	std::istringstream paramStream{paramString};
 	std::string pair;
 	while (std::getline(paramStream, pair, '&')) {
@@ -56,10 +100,10 @@ HttpHeader::HttpHeader(const std::string &rawRequest) {
 			continue;
 		}
 
-		auto key = trim(std::string_view(pair.c_str(), eqIt));
-		auto value = trim(
-			std::string_view(pair.c_str() + eqIt + 1, pair.size() - eqIt - 1));
-		parameters[std::string{key}] = std::string{value};
+		std::string key{Trim(std::string_view(pair.c_str(), eqIt))};
+		std::string_view value{
+			Trim(std::string_view(pair.c_str() + eqIt + 1, pair.size() - eqIt - 1))};
+		parameters[ToLowercase(key)] = value;
 	}
 	path.erase(paramStartIt);
 }
@@ -102,16 +146,27 @@ HttpRequest::HttpRequest(const std::string &rawRequest) : header{rawRequest} {
 		return;
 	}
 
-	body = std::string{rawRequest.begin() + bodyIt + 2, rawRequest.end()};
+	if (header.headers.contains("content-type")) {
+		auto contentType = header.headers["content-type"];
+		BodyType type;
+		for (const auto &[bodyType, value] : bodyTypes) {
+			if (value == contentType) {
+				type = bodyType;
+				break;
+			}
+		}
+
+		body = BodyInfo{std::string{rawRequest.begin() + bodyIt + 2, rawRequest.end()}, type};
+	}
 }
 std::string HttpRequest::Stringify() const {
 	std::stringstream ss;
 	ss << header.Stringify();
 
-	ss << "Content-Length: " << body.size() << "\r\n";
-	if (!body.empty()) {
-		ss << "Content-Type: application/json\r\n";
-		ss << "\r\n" << body;
+	ss << "content-length: " << body.body.size() << "\r\n";
+	if (!body.body.empty()) {
+		ss << std::format("content-type: {}\r\n", bodyTypes.at(body.type));
+		ss << "\r\n" << body.body;
 	} else {
 		ss << "\r\n";
 	}
@@ -119,10 +174,35 @@ std::string HttpRequest::Stringify() const {
 	return ss.str();
 }
 
-HttpRequest HttpRequest::BadRequest() {
-    HttpRequest ret;
-    ret.header.statusCode = "400 BAD REQUEST";
+HttpRequest HttpRequest::BadRequest(std::string_view msg) {
+	HttpRequest ret;
+	ret.header.statusCode = "400 BAD REQUEST";
 	ret.header.headers["Connection"] = "close";
+	ret.body = {std::string{msg}, BodyType::PlainText};
 
-    return ret;
+	return ret;
+}
+
+std::optional<std::string> ExtractPathVariable(std::string_view pattern, std::string_view path,
+											   std::size_t idx) {
+	auto patternSegments = SplitString(pattern, '/');
+	auto pathSegments = SplitString(path, '/');
+
+	if (pathSegments.size() != pathSegments.size()) {
+		return std::nullopt;
+	}
+
+	for (auto patternIt = patternSegments.begin(), pathIt = pathSegments.begin();
+		 patternIt != patternSegments.end() && pathIt != pathSegments.end();
+		 ++patternIt, ++pathIt) {
+			if((*patternIt).starts_with('{') && (*patternIt).ends_with('}')){
+				if(idx > 0){
+					idx--;
+					continue;
+				}
+				return std::string{*pathIt};
+			}
+	}
+
+	return std::nullopt;
 }

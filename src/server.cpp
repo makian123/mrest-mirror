@@ -7,6 +7,7 @@
 #include "asio/ip/address_v4.hpp"
 #include "asio/ip/tcp.hpp"
 #include "asio/socket_base.hpp"
+#include "exceptions/bad_request.hpp"
 #include "request.hpp"
 #include "tcp_connection.hpp"
 
@@ -78,32 +79,36 @@ void Server::Disconnect(int connectionId) {
 void Server::OnReceived(int connectionId, const char *data,
 						const std::size_t size) {
 	HttpRequest request{std::string(data, data + size)};
+	std::string exceptionMsg;
 
 	if (filter.Filter(request)) {
 		auto handler = controllers.GetPathHandler(request.header.method, request.header.path);
-		if (!handler) {
-			std::println("Denied access");
-			return;
-		}
 
 		try {
+			if (!handler) {
+				throw BadRequestException("No access");
+			}
+
 			auto value = (*handler)(request);
 			HttpHeader headers;
 			headers.statusCode = "200 OK";
 
-			HttpRequest request;
-			request.header = headers;
-			if (!value.empty()) {
-				request.body = value;
-			}
+			HttpResponse response;
+			response.header = headers;
+			response.body = value;
 
-			std::string stringified = request.Stringify();
+			std::string stringified = response.Stringify();
 			Send(connectionId, stringified.c_str(), stringified.size());
 		} catch (std::exception &e) {
+			exceptionMsg = e.what();
+			std::println("Error serving {}: {}", request.header.path, e.what());
 		}
 	}
 
-	std::string stringified = HttpRequest::BadRequest().Stringify();
+	auto response = HttpResponse::BadRequest(exceptionMsg);
+	response.body.type = HttpResponse::BodyInfo::Type::PlainText;
+	auto stringified = response.Stringify();
+	
 	Send(connectionId, stringified.c_str(), stringified.size());
 	Disconnect(connectionId);
 }

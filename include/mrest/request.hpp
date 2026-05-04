@@ -1,7 +1,9 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <optional>
 
 struct HttpHeader {
 	std::string method;
@@ -19,14 +21,28 @@ struct HttpHeader {
 };
 struct HttpRequest {
     HttpHeader header;
-    std::string body;
+    struct BodyInfo {
+        enum class Type {
+            JSON,
+            PlainText,
+            CSS,
+            HTML,
+            Javascript,
+            Bytes,
+        };
+    
+        std::string body;
+        Type type = Type::JSON;
+    } body;
 
     HttpRequest() = default;
     explicit HttpRequest(const std::string &rawRequest);
 
     std::string Stringify() const;
 
-    static HttpRequest BadRequest();
+    static HttpRequest BadRequest(std::string_view message = "");
 };
 // Possible better ways to do this
 using HttpResponse = HttpRequest;
+
+std::optional<std::string> ExtractPathVariable(std::string_view pattern, std::string_view path, std::size_t idx);

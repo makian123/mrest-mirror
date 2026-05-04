@@ -2,7 +2,8 @@
 
 #include "util/reflection.hpp"
 
-struct RequestBody {};
+struct RequestBodyImpl {};
+inline RequestBodyImpl RequestBody;
 
 struct RequestParam {
     StringLiteral name;
