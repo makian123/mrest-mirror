@@ -11,29 +11,31 @@
 #include "request_interceptor.hpp"
 #include "tcp_connection.hpp"
 
-class Server: public Observer {
-	public:
+namespace mrest {
+class Server : public Observer {
+   public:
 	struct Config {
 		std::string ip;
 		std::uint16_t port;
 	};
 
 	ControllerManager controllers;
-	
+
 	Server(asio::io_context &io_context, std::string_view configPath);
 	~Server() { Stop(); }
-	
+
 	void AddFilter(FilterChain::FilterMethod method) { filter.AddBack(method); }
-	
+
 	void Start();
 	void Stop();
-	
+
 	void Send(int connectionId, const char *data, std::size_t size);
 	void Disconnect(int connectionId);
-	
-	asio::awaitable<void> OnReceived(int connectionId, const char *data, const std::size_t size) override;
 
-	private:
+	asio::awaitable<void> OnReceived(int connectionId, const char *data,
+									 const std::size_t size) override;
+
+   private:
 	FilterChain filter;
 	asio::ip::tcp::acceptor acceptor;
 
@@ -44,3 +46,4 @@ class Server: public Observer {
 
 	void DoAccept();
 };
+}  // namespace mrest

@@ -10,7 +10,6 @@
 #include <iterator>
 #include <memory>
 #include <print>
-#include <fstream>
 
 #include "asio/awaitable.hpp"
 #include "asio/ip/address_v4.hpp"
@@ -20,17 +19,18 @@
 #include "request.hpp"
 #include "tcp_connection.hpp"
 
+namespace mrest {
 Server::Server(asio::io_context &io_context, std::string_view configPath) : acceptor(io_context) {
 	this->context = &io_context;
 
-	if(!std::filesystem::exists(configPath)){
+	if (!std::filesystem::exists(configPath)) {
 		std::println("File {} does not exist", configPath);
 		throw std::exception();
 	}
 	std::ifstream file{std::filesystem::path{configPath}};
-	std::string fileData {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+	std::string fileData{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
 
-	if(auto err = glz::read_toml<Config>(config, fileData); err){
+	if (auto err = glz::read_toml<Config>(config, fileData); err) {
 		std::println("Error reading toml: {}", glz::format_error(err, fileData));
 		throw std::exception();
 	}
@@ -99,7 +99,8 @@ void Server::Disconnect(int connectionId) {
 	connections.erase(it);
 }
 
-asio::awaitable<void> Server::OnReceived(int connectionId, const char *data, const std::size_t size) {
+asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
+										 const std::size_t size) {
 	HttpRequest request{std::string(data, data + size)};
 	std::string exceptionMsg;
 
@@ -108,7 +109,7 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data, con
 
 		try {
 			if (!handler) {
-				throw BadRequestException("No access");
+				throw exception::BadRequestException("No access");
 			}
 
 			auto value = co_await (*handler)(request);
@@ -123,8 +124,7 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data, con
 			Send(connectionId, stringified.c_str(), stringified.size());
 
 			co_return;
-		}
-		 catch (std::exception &e) {
+		} catch (std::exception &e) {
 			exceptionMsg = e.what();
 			std::println("Error serving {}: {}", request.header.path, e.what());
 		}
@@ -139,3 +139,4 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data, con
 
 	co_return;
 }
+}  // namespace mrest

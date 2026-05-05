@@ -13,6 +13,7 @@
 #include "asio/use_awaitable.hpp"
 #include "observer.hpp"
 
+namespace mrest {
 TcpConnection::TcpConnection(asio::ip::tcp::socket &&sock, Observer &observer, int id)
 	: socket{std::move(sock)}, observer{observer}, id{id} {}
 
@@ -23,7 +24,7 @@ std::shared_ptr<TcpConnection> TcpConnection::create(asio::ip::tcp::socket &&soc
 
 void TcpConnection::startReading() {
 	if (!isReading) {
-		co_spawn (*observer.context, doRead(), asio::detached);
+		co_spawn(*observer.context, doRead(), asio::detached);
 	}
 }
 void TcpConnection::send(const char *data, size_t size) {
@@ -56,7 +57,7 @@ asio::awaitable<void> TcpConnection::doRead() {
 		readBuf.commit(bytesTransferred);
 		co_await observer.OnReceived(id, static_cast<const char *>(readBuf.data().data()),
 									 bytesTransferred);
-		
+
 		readBuf.consume(1024);
 	}
 	co_return;
@@ -80,3 +81,4 @@ void TcpConnection::doWrite() {
 		doWrite();
 	});
 }
+}  // namespace mrest

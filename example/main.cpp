@@ -24,6 +24,8 @@ struct AuthRequestDto {
 	std::string username;
 	std::string password;
 };
+using namespace mrest::annotation;
+using namespace mrest::exception;
 class[[=RestController("/public")]] Controller {
 	std::unordered_map<std::string, std::string> users;
 
@@ -82,8 +84,8 @@ class[[=RestController("/public")]] Controller {
 
 int main() {
 	asio::io_context io_context;
-	Server serv{io_context, "configuration.toml"};
-	serv.AddFilter([](HttpRequest &request) {
+	mrest::Server serv{io_context, "configuration.toml"};
+	serv.AddFilter([](mrest::HttpRequest &request) {
 		if (request.header.path.starts_with("/api")) {
 			return false;
 		}
