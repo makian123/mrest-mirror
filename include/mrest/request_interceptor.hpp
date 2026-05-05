@@ -5,6 +5,7 @@
 
 #include "request.hpp"
 
+namespace mrest{
 class FilterChain {
    public:
 	/** Requires all the filters to return true to allow a request.
@@ -42,3 +43,4 @@ class FilterChain {
 		next = std::make_unique<FilterChain>(method);
 	}
 };
+}

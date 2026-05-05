@@ -9,6 +9,7 @@
 #include "asio/streambuf.hpp"
 #include "observer.hpp"
 
+namespace mrest{
 class TcpConnection: public std::enable_shared_from_this<TcpConnection> {
     asio::ip::tcp::socket socket;
     asio::streambuf readBuf{};
@@ -30,3 +31,4 @@ class TcpConnection: public std::enable_shared_from_this<TcpConnection> {
     void send(const char *data, size_t size);
     void close();
 };
+}

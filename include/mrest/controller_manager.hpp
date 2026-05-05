@@ -21,15 +21,12 @@
 #include "annotations/controller.hpp"
 #include "annotations/parameters.hpp"
 #include "annotations/request.hpp"
-#include <exceptions/exceptions.hpp>
 #include "asio/awaitable.hpp"
 #include "request.hpp"
 #include "util/reflection.hpp"
+#include "util/trait.hpp"
 
-template <typename T>
-concept HasToString = requires(T a) {
-	{ std::to_string(a) } -> std::convertible_to<std::string>;
-};
+namespace mrest {
 class ControllerManager {
    public:
 	using RouteHandler = std::function<asio::awaitable<HttpResponse::BodyInfo>(HttpRequest &)>;
@@ -37,6 +34,9 @@ class ControllerManager {
 	template <typename T, typename... Args>
 	// TODO: use reflection to extract all endpoint handlers
 	T &AddController(Args &&...args) {
+		using namespace mrest::util;
+		using namespace mrest::annotation;
+
 		static_assert(HasAnnotation<RestController>(^^T),
 					  "Object needs to have RestController annotation");
 		// Use shared pointer for std::any's copy constructible requirement
@@ -78,6 +78,13 @@ class ControllerManager {
 										if constexpr (SameAnnotation<RequestParam>(
 														  paramAnnotation)) {
 											queryIndices.emplace(
+												std::string{[:constant_of(paramAnnotation):]
+																.name.text},
+												idx);
+										}
+										if constexpr (SameAnnotation<PathVariable>(
+														  paramAnnotation)) {
+											pathVariables.emplace(
 												std::string{[:constant_of(paramAnnotation):]
 																.name.text},
 												idx);
@@ -150,6 +157,8 @@ class ControllerManager {
 							   const std::unordered_map<std::string, int> &queryIndices,
 							   const std::unordered_map<std::string, int> &pathVariables,
 							   int bodyIdx) {
+		using namespace mrest::annotation;
+		using namespace mrest::util;
 		std::string pattern{requestPattern};
 		return [=](HttpRequest &request) -> asio::awaitable<HttpResponse::BodyInfo> {
 			using RetType = R::value_type;
@@ -196,7 +205,7 @@ class ControllerManager {
 						auto extractedPathVar =
 							ExtractPathVariable(pattern, request.header.path, pathVarNumber);
 						if (!extractedPathVar) {
-							throw BadRequestException("Could not extract path variable");
+							throw exception::BadRequestException("Could not extract path variable");
 						}
 						if constexpr (std::is_convertible_v<std::remove_cvref_t<Args...[idx]>,
 															std::string>) {
@@ -258,3 +267,4 @@ class ControllerManager {
 		return std::array{I...};
 	}
 };
+}  // namespace mrest

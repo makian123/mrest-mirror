@@ -24,8 +24,9 @@ std::vector<std::string> SplitPath(std::string_view path) {
 }
 }  // namespace
 
-using RouteHandler = ControllerManager::RouteHandler;
 
+namespace mrest{
+using RouteHandler = ControllerManager::RouteHandler;
 bool ControllerManager::MatchRoute(std::string_view pattern,
 								   std::string_view path) const {
 	auto patternSegments = SplitPath(pattern);
@@ -65,4 +66,5 @@ std::optional<RouteHandler> ControllerManager::GetPathHandler(
 		}
 	}
 	return std::nullopt;
+}
 }

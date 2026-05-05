@@ -28,24 +28,24 @@ std::string &ToLowercase(std::string &str) {
 std::vector<std::string_view> SplitString(std::string_view str, char delim) {
 	std::vector<std::string_view> segments;
 
-	if(str.starts_with(delim)){
+	if (str.starts_with(delim)) {
 		str = str.substr(1);
 	}
 	auto it = str.find(delim);
-	while(it != std::string_view::npos){
+	while (it != std::string_view::npos) {
 		segments.push_back(str.substr(0, it));
 		str = str.substr(it + 1);
 
 		it = str.find(delim);
 	}
-	if(str.size()){
+	if (str.size()) {
 		segments.push_back(str);
 	}
 
 	return segments;
 }
 
-using BodyType = HttpRequest::BodyInfo::Type;
+using BodyType = mrest::HttpRequest::BodyInfo::Type;
 const std::unordered_map<BodyType, std::string> bodyTypes{
 	{BodyType::JSON, "application/json"},
 	{BodyType::PlainText, "text/plain"},
@@ -57,6 +57,7 @@ const std::unordered_map<BodyType, std::string> bodyTypes{
 };
 }  // namespace
 
+namespace mrest {
 HttpHeader::HttpHeader(const std::string &rawRequest) {
 	std::istringstream stream{rawRequest};
 	std::string line;
@@ -195,14 +196,15 @@ std::optional<std::string> ExtractPathVariable(std::string_view pattern, std::st
 	for (auto patternIt = patternSegments.begin(), pathIt = pathSegments.begin();
 		 patternIt != patternSegments.end() && pathIt != pathSegments.end();
 		 ++patternIt, ++pathIt) {
-			if((*patternIt).starts_with('{') && (*patternIt).ends_with('}')){
-				if(idx > 0){
-					idx--;
-					continue;
-				}
-				return std::string{*pathIt};
+		if ((*patternIt).starts_with('{') && (*patternIt).ends_with('}')) {
+			if (idx > 0) {
+				idx--;
+				continue;
 			}
+			return std::string{*pathIt};
+		}
 	}
 
 	return std::nullopt;
 }
+}  // namespace mrest
