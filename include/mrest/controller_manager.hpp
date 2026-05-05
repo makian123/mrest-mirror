@@ -11,6 +11,7 @@
 #include <nlohmann/detail/conversions/to_json.hpp>
 #include <nlohmann/json.hpp>
 #include <print>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -66,16 +67,21 @@ class ControllerManager {
 							AnnotationPos<decltype(RequestBody)>(parameters_of(func));
 
 						constexpr auto params = define_static_array(parameters_of(func));
-						template for (constexpr auto idx :
-									  make_index_array(std::make_index_sequence<params.size()>{})) {
-							if constexpr (HasAnnotation<RequestParam>(params[idx]) ||
-										  HasAnnotation<PathVariable>(params[idx])) {
-								template for (constexpr auto paramAnnotation :
-											  define_static_array(annotations_of(params[idx]))) {
-									if constexpr (SameAnnotation<RequestParam>(paramAnnotation)) {
-										queryIndices.emplace(
-											std::string{[:constant_of(paramAnnotation):].name.text},
-											idx);
+						if constexpr (params.size() > 0) {
+							template for (constexpr auto idx : make_index_array(
+											  std::make_index_sequence<params.size()>{})) {
+								if constexpr (HasAnnotation<RequestParam>(params[idx]) ||
+											  HasAnnotation<PathVariable>(params[idx])) {
+									template for (constexpr auto paramAnnotation :
+												  define_static_array(
+													  annotations_of(params[idx]))) {
+										if constexpr (SameAnnotation<RequestParam>(
+														  paramAnnotation)) {
+											queryIndices.emplace(
+												std::string{[:constant_of(paramAnnotation):]
+																.name.text},
+												idx);
+										}
 									}
 								}
 							}
@@ -150,7 +156,7 @@ class ControllerManager {
 			// TODO: remove forced default initialization
 			std::tuple<std::remove_cvref_t<Args>...> ref{};
 
-			auto set = [&]<auto I>(auto &e) { std::get<I>(ref) = std::forward<decltype(e)>(e); };
+			auto set = [&]<auto I>(auto &&e) { std::get<I>(ref) = std::forward<decltype(e)>(e); };
 
 			// Pre-process the request
 			if constexpr (sizeof...(Args) > 0) {
@@ -175,7 +181,8 @@ class ControllerManager {
 						} else if constexpr (std::is_fundamental_v<
 												 std::remove_cvref_t<Args...[idx]>>) {
 							set.template operator()<idx>(
-								std::stoull(request.header.parameters[queryIt->first]));
+								StringTo<std::remove_cvref_t<Args...[idx]>>(
+									request.header.parameters[queryIt->first]));
 						}
 						continue;
 					}
@@ -196,7 +203,8 @@ class ControllerManager {
 							set.template operator()<idx>(*extractedPathVar);
 						} else if constexpr (std::is_fundamental_v<
 												 std::remove_cvref_t<Args...[idx]>>) {
-							set.template operator()<idx>(std::stoull(*extractedPathVar));
+							set.template operator()<idx>(
+								StringTo<std::remove_cvref_t<Args...[idx]>>(*extractedPathVar));
 						}
 						continue;
 					}
@@ -230,6 +238,15 @@ class ControllerManager {
 
 			co_return HttpResponse::BodyInfo{};
 		};
+	}
+	template <typename T>
+		requires std::is_fundamental_v<T>
+	static const T StringTo(const std::string &str) {
+		std::istringstream iss{str};
+		T val;
+		iss >> val;
+
+		return val;
 	}
 	template <typename C, typename R, typename... Args>
 	static std::function<R(Args...)> MakeFunction(C &obj, R (C::*mf)(Args...)) {

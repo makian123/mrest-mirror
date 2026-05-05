@@ -6,9 +6,11 @@
 #include <ostream>
 #include <print>
 
+#include "asio/awaitable.hpp"
 #include "asio/co_spawn.hpp"
 #include "asio/detached.hpp"
 #include "asio/io_context.hpp"
+#include "asio/use_awaitable.hpp"
 #include "observer.hpp"
 
 TcpConnection::TcpConnection(asio::ip::tcp::socket &&sock, Observer &observer, int id)
@@ -21,7 +23,7 @@ std::shared_ptr<TcpConnection> TcpConnection::create(asio::ip::tcp::socket &&soc
 
 void TcpConnection::startReading() {
 	if (!isReading) {
-		doRead();
+		co_spawn (*observer.context, doRead(), asio::detached);
 	}
 }
 void TcpConnection::send(const char *data, size_t size) {
@@ -43,27 +45,21 @@ void TcpConnection::close() {
 	}
 }
 
-void TcpConnection::doRead() {
-	isReading = true;
-
+asio::awaitable<void> TcpConnection::doRead() {
 	auto buffers{readBuf.prepare(1024)};
 	auto self{shared_from_this()};
 
-	socket.async_read_some(buffers, [this, self](const auto &err, auto bytesTransferred) {
-		if (err) {
-			isReading = false;
-			return close();
-		}
+	while (true) {
+		std::size_t bytesTransferred =
+			co_await socket.async_read_some(readBuf.prepare(1024), asio::use_awaitable);
 
 		readBuf.commit(bytesTransferred);
-		asio::co_spawn(*observer.context,
-					   observer.OnReceived(id, static_cast<const char *>(readBuf.data().data()),
-										   bytesTransferred),
-					   asio::detached);
-		readBuf.consume(bytesTransferred);
-		isReading = false;
-		doRead();
-	});
+		co_await observer.OnReceived(id, static_cast<const char *>(readBuf.data().data()),
+									 bytesTransferred);
+		
+		readBuf.consume(1024);
+	}
+	co_return;
 }
 void TcpConnection::doWrite() {
 	isWriting = true;

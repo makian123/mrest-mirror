@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <memory>
 #include <mutex>
+#include "asio/awaitable.hpp"
 #include "asio/io_context.hpp"
 #include "asio/ip/tcp.hpp"
 #include "asio/streambuf.hpp"
@@ -19,7 +20,7 @@ class TcpConnection: public std::enable_shared_from_this<TcpConnection> {
 
     TcpConnection(asio::ip::tcp::socket &&socket, Observer &observer, int id);
 
-    void doRead();
+    asio::awaitable<void> doRead();
     void doWrite();
     public:
     ~TcpConnection() { close(); }

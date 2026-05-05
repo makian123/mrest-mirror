@@ -121,7 +121,10 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data, con
 
 			std::string stringified = response.Stringify();
 			Send(connectionId, stringified.c_str(), stringified.size());
-		} catch (std::exception &e) {
+
+			co_return;
+		}
+		 catch (std::exception &e) {
 			exceptionMsg = e.what();
 			std::println("Error serving {}: {}", request.header.path, e.what());
 		}
@@ -133,4 +136,6 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data, con
 
 	Send(connectionId, stringified.c_str(), stringified.size());
 	Disconnect(connectionId);
+
+	co_return;
 }
