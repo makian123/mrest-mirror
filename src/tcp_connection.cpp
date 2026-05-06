@@ -15,7 +15,8 @@
 
 namespace mrest {
 TcpConnection::TcpConnection(asio::ip::tcp::socket &&sock, Observer &observer, int id)
-	: socket{std::move(sock)}, observer{observer}, id{id} {}
+	: socket{std::move(sock)}, observer{observer}, id{id} {
+	}
 
 std::shared_ptr<TcpConnection> TcpConnection::create(asio::ip::tcp::socket &&socket,
 													 Observer &observer, int id) {

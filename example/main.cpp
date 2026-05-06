@@ -9,6 +9,7 @@
 #include "annotations/parameters.hpp"
 #include "asio/awaitable.hpp"
 #include "asio/io_context.hpp"
+#include "cookie.hpp"
 #include "exceptions/bad_request.hpp"
 #include "request.hpp"
 #include "request_interceptor.hpp"
@@ -33,10 +34,19 @@ class[[=RestController("/public")]] Controller {
 	Controller() = default;
 
 	[[=GetRequest("/info")]]
-	asio::awaitable<std::string> UserInfo([[=RequestParam("username")]] std::string username) {
+	asio::awaitable<std::string> UserInfo([[=RequestParam("username")]] std::string username,
+	[[=RequestCookies]] const mrest::CookieContainer &cookies) {
+		if(auto cookie = cookies.GetCookie("token"); cookie){
+			std::println("Token: {}", (*cookie)->value);
+		}
+		else{
+			throw BadRequestException("No token cookie");
+		}
+		
 		if(!users.contains(username)){
 			throw BadRequestException("User not found");
 		}
+
 		co_return users[username];
 	}
 	[[=GetRequest("/info/{username}")]]
@@ -51,14 +61,15 @@ class[[=RestController("/public")]] Controller {
 		}
 
 		std::string bodyJson;
-		glz::write_json(body, bodyJson);
+		auto ignored = glz::write_json(body, bodyJson);
 		std::println("Body: {}", bodyJson);
 		std::println("Token: {}", token);
 		co_return users[username];
 	}
 
 	[[=PostRequest("/login")]]
-	asio::awaitable<TmpStruct> TestRequest([[=RequestBody]] const AuthRequestDto &request) {
+	asio::awaitable<TmpStruct> TestRequest([[=RequestBody]] const AuthRequestDto &request, [[=RequestSession]] const mrest::HttpSession &session) {
+		std::println("Session id: {}", session.GetId());
 		auto userIt = std::find_if(users.begin(), users.end(),
 								   [&request](const std::pair<std::string, std::string> &usrInfo) {
 									   return usrInfo.first == request.username &&

@@ -1,4 +1,5 @@
 #include <cctype>
+#include <chrono>
 #include <optional>
 #include <print>
 #include <ranges>
@@ -83,6 +84,11 @@ HttpHeader::HttpHeader(const std::string &rawRequest) {
 		std::string value{
 			Trim(std::string_view(line.c_str() + delimPos + 1, line.size() - delimPos - 1))};
 
+		if (key == "Cookie" || key == "Set-Cookie") {
+			cookies.AddCookie(Cookie{value});
+			continue;
+		}
+
 		headers[ToLowercase(key)] = std::string{value};
 	}
 
@@ -111,6 +117,7 @@ HttpHeader::HttpHeader(const std::string &rawRequest) {
 std::string HttpHeader::Stringify() const {
 	std::stringstream ss;
 
+	std::string cookieHeaderKey = statusCode.empty() ? "Cookie" : "Set-Cookie";
 	// Request headers
 	if (statusCode.empty()) {
 		ss << method << ' ' << path;
@@ -138,6 +145,10 @@ std::string HttpHeader::Stringify() const {
 		ss << key << ": " << value << "\r\n";
 	}
 
+	for(auto &cookie: cookies.GetAllCookies()) {
+		ss << cookieHeaderKey << ": " << cookie.Stringify() << "\r\n";
+	}
+
 	return ss.str();
 }
 
@@ -159,6 +170,10 @@ HttpRequest::HttpRequest(const std::string &rawRequest) : header{rawRequest} {
 
 		body = BodyInfo{std::string{rawRequest.begin() + bodyIt + 2, rawRequest.end()}, type};
 	}
+}
+HttpRequest::HttpRequest(HttpSession &session, const std::string &rawRequest)
+	: HttpRequest(rawRequest) {
+	this->session = &session;
 }
 std::string HttpRequest::Stringify() const {
 	std::stringstream ss;

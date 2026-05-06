@@ -65,6 +65,10 @@ class ControllerManager {
 						std::unordered_map<std::string, int> pathVariables;
 						constexpr int bodyIdx =
 							AnnotationPos<decltype(RequestBody)>(parameters_of(func));
+						constexpr int cookieIdx =
+							AnnotationPos<decltype(RequestCookies)>(parameters_of(func));
+							constexpr int sessionIdx =
+							AnnotationPos<decltype(RequestSession)>(parameters_of(func));
 
 						constexpr auto params = define_static_array(parameters_of(func));
 						if constexpr (params.size() > 0) {
@@ -99,9 +103,9 @@ class ControllerManager {
 							std::make_pair(std::string{req.method.text},
 										   std::string{literal} + std::string{req.route.text});
 
-						routes.back()[metadata] = CreateHandler(
+						routes.back()[metadata] = CreateHandler<sessionIdx, bodyIdx, cookieIdx>(
 							metadata.first, metadata.second, MakeFunction(*stored_ptr, &[:func:]),
-							queryIndices, pathVariables, bodyIdx);
+							queryIndices, pathVariables);
 					}
 				}
 			}
@@ -150,13 +154,12 @@ class ControllerManager {
 	template <typename T>
 	struct is_awaitable<asio::awaitable<T>> : std::true_type {};
 
-	template <typename R, typename... Args>
+	template <int SessionIdx, int BodyIdx, int CookieIdx, typename R, typename... Args>
 		requires is_awaitable<R>::value
 	RouteHandler CreateHandler(std::string_view requestMethod, const std::string &requestPattern,
 							   std::function<R(Args...)> method,
 							   const std::unordered_map<std::string, int> &queryIndices,
-							   const std::unordered_map<std::string, int> &pathVariables,
-							   int bodyIdx) {
+							   const std::unordered_map<std::string, int> &pathVariables) {
 		using namespace mrest::annotation;
 		using namespace mrest::util;
 		std::string pattern{requestPattern};
@@ -171,11 +174,18 @@ class ControllerManager {
 			if constexpr (sizeof...(Args) > 0) {
 				template for (constexpr auto idx :
 							  make_index_array(std::make_index_sequence<sizeof...(Args)>{})) {
-					if (bodyIdx == idx) {
+					if constexpr (BodyIdx == idx) {
 						auto body =
 							glz::read_json<std::remove_cvref_t<Args...[idx]>>(request.body.body)
 								.value();
 						set.template operator()<idx>(body);
+						continue;
+					} else if constexpr (CookieIdx == idx) {
+						set.template operator()<idx>(request.header.cookies);
+						continue;
+					}
+					else if constexpr(SessionIdx == idx) {
+						set.template operator()<idx>(*request.session);
 						continue;
 					}
 
