@@ -2,6 +2,8 @@
 
 #include <meta>
 #include <string_view>
+#include <type_traits>
+#include <optional>
 
 namespace mrest {
 namespace util {
@@ -35,6 +37,29 @@ consteval int AnnotationPos(std::vector<std::meta::info> annotations) {
 		}
 	}
 	return -1;
+}
+
+template<typename E>
+requires std::is_enum_v<E>
+std::string_view EnumToString(E val){
+	template for(constexpr auto &enumerator: define_static_array(enumerators_of(^^E))){
+		if(val == [:enumerator:]){
+			return std::meta::display_string_of(enumerator);
+		}
+	}
+
+	return "<unnamed>";
+}
+template<typename E>
+requires std::is_enum_v<E>
+std::optional<E> StringToEnum(std::string_view val){
+	template for(constexpr auto &enumerator: define_static_array(enumerators_of(^^E))){
+		if(val == display_string_of(enumerator)){
+			return [:enumerator:];
+		}
+	}
+
+	return std::nullopt;
 }
 }  // namespace reflection
 }  // namespace mrest

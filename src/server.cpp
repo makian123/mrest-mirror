@@ -14,7 +14,6 @@
 #include "asio/awaitable.hpp"
 #include "asio/ip/address_v4.hpp"
 #include "asio/ip/tcp.hpp"
-#include "asio/socket_base.hpp"
 #include "exceptions/bad_request.hpp"
 #include "request.hpp"
 #include "tcp_connection.hpp"
@@ -65,8 +64,9 @@ void Server::DoAccept() {
 
 		std::shared_ptr<TcpConnection> connection{
 			TcpConnection::create(std::move(socket), *this, connections.size())};
+		const auto id = connections.size();
 		connection->startReading();
-		connections.insert({connections.size(), std::move(connection)});
+		connections.insert({id, std::move(connection)});
 
 		if (!isClosing.load()) {
 			DoAccept();
@@ -99,12 +99,48 @@ void Server::Disconnect(int connectionId) {
 	connections.erase(it);
 }
 
+std::optional<HttpSession *> Server::GetSessionByUUID(std::string_view sessionId) {
+	auto it = std::find_if(sessions.begin(), sessions.end(),
+						   [sessionId](const std::pair<int, HttpSession> &session) {
+							   return session.second.GetId() == sessionId;
+						   });
+
+	return it != sessions.end() ? std::optional(&it->second) : std::nullopt;
+}
+
 asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
 										 const std::size_t size) {
-	HttpRequest request{std::string(data, data + size)};
 	std::string exceptionMsg;
+	HttpSession *connSession{nullptr};
+	if (sessions.contains(connectionId)) {
+		connSession = &sessions.at(connectionId);
+	}
+	HttpRequest request{*connSession, std::string(data, data + size)};
 
-	if (filter.Filter(request)) {
+	// Check if session cookie exists
+	bool appendSessionCookie{true};
+	if (std::optional<const Cookie *> cookie =
+			request.header.cookies.GetCookie(config.sessionCookieName)) {
+		if (!connSession) {
+			const Cookie *cookieVal = *cookie;
+			auto gottenSession = GetSessionByUUID(cookieVal->value);
+			if (gottenSession) {
+				request.session = *gottenSession;
+			}
+		} else {
+			appendSessionCookie = false;
+		}
+	}
+	if(!request.session) {
+		sessions.emplace(connectionId, HttpSession(3600));
+		request.session = &sessions.at(connectionId);
+	}
+
+	if (!request.session) {
+		exceptionMsg = "Session does not exist";
+	}
+
+	if (request.session && filter.Filter(request)) {
 		auto handler = controllers.GetPathHandler(request.header.method, request.header.path);
 
 		try {
@@ -120,6 +156,11 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
 			response.header = headers;
 			response.body = value;
 
+			if (appendSessionCookie) {
+				response.header.cookies.AddCookie(Cookie{std::string{config.sessionCookieName},
+														 std::string{request.session->GetId()}});
+			}
+
 			std::string stringified = response.Stringify();
 			Send(connectionId, stringified.c_str(), stringified.size());
 
@@ -132,11 +173,15 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
 
 	auto response = HttpResponse::BadRequest(exceptionMsg);
 	response.body.type = HttpResponse::BodyInfo::Type::PlainText;
+	if (appendSessionCookie) {
+		response.header.cookies.AddCookie(
+			Cookie{std::string{config.sessionCookieName}, std::string{request.session->GetId()}});
+	}
+
 	auto stringified = response.Stringify();
 
 	Send(connectionId, stringified.c_str(), stringified.size());
 	Disconnect(connectionId);
-
 	co_return;
 }
 }  // namespace mrest

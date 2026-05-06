@@ -5,10 +5,15 @@
 namespace mrest {
 namespace impl {
 struct RequestBodyImpl {};
+struct RequestCookiesImpl {};
+struct RequestSessionImpl {};
 }  // namespace impl
 
 namespace annotation {
-inline mrest::impl::RequestBodyImpl RequestBody;
+inline impl::RequestBodyImpl RequestBody;
+inline impl::RequestCookiesImpl RequestCookies;
+inline impl::RequestSessionImpl RequestSession;
+
 struct RequestParam {
 	util::StringLiteral name;
 
