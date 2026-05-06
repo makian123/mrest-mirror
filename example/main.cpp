@@ -35,7 +35,7 @@ class[[=RestController("/public")]] Controller {
 
 	[[=GetRequest("/info")]]
 	asio::awaitable<std::string> UserInfo([[=RequestParam("username")]] std::string username,
-	[[=RequestCookies]] const mrest::CookieContainer &cookies) {
+	[[=RequestCookies]] const mrest::CookieContainer &cookies) const {
 		if(auto cookie = cookies.GetCookie("token"); cookie){
 			std::println("Token: {}", (*cookie)->value);
 		}
@@ -47,12 +47,12 @@ class[[=RestController("/public")]] Controller {
 			throw BadRequestException("User not found");
 		}
 
-		co_return users[username];
+		co_return users.at(username);
 	}
 	[[=GetRequest("/info/{username}")]]
 	asio::awaitable<std::string> PathUserInfo([[=RequestBody]] const AuthRequestDto &body, 
 		[[=PathVariable("username")]] const std::string &username, 
-		[[=RequestParam("token")]] const std::string &token) {
+		[[=RequestParam("token")]] const std::string &token) const {
 		if(!users.contains(username)){
 			throw BadRequestException("User not found");
 		}
@@ -64,7 +64,7 @@ class[[=RestController("/public")]] Controller {
 		auto ignored = glz::write_json(body, bodyJson);
 		std::println("Body: {}", bodyJson);
 		std::println("Token: {}", token);
-		co_return users[username];
+		co_return users.at(username);
 	}
 
 	[[=PostRequest("/login")]]

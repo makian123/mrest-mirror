@@ -271,6 +271,10 @@ class ControllerManager {
 	static std::function<R(Args...)> MakeFunction(C &obj, R (C::*mf)(Args...)) {
 		return [&obj, mf](Args... args) -> R { return (obj.*mf)(std::forward<Args>(args)...); };
 	}
+	template <typename C, typename R, typename... Args>
+	static std::function<R(Args...)> MakeFunction(C &obj, R (C::*mf)(Args...) const) {
+		return [&obj, mf](Args... args) -> R { return (obj.*mf)(std::forward<Args>(args)...); };
+	}
 
 	template <std::size_t... I>
 	static constexpr auto make_index_array(std::index_sequence<I...>) {
