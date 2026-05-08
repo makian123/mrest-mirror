@@ -139,7 +139,20 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
 	if (!request.session) {
 		exceptionMsg = "Session does not exist";
 	}
+	if(request.header.method == "OPTIONS"){
+		HttpResponse response;
+		response.header.statusCode = "200 OK";
+		response.session = request.session;
+		cors.AppendToResponse(response);
 
+		std::string stringified = response.Stringify();
+		request.body.type = HttpRequest::BodyInfo::Type::PlainText;
+
+		Send(connectionId, stringified.c_str(), stringified.size());
+
+		co_return;
+	}
+	// Serve request
 	if (request.session && filter.Filter(request)) {
 		auto handler = controllers.GetPathHandler(request.header.method, request.header.path);
 
@@ -160,6 +173,7 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
 				response.header.cookies.AddCookie(Cookie{std::string{config.sessionCookieName},
 														 std::string{request.session->GetId()}});
 			}
+			cors.AppendToResponse(response);
 
 			std::string stringified = response.Stringify();
 			Send(connectionId, stringified.c_str(), stringified.size());

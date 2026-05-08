@@ -13,6 +13,14 @@ namespace {
 std::string ExtractCookievalue(std::string_view str) {
     return std::string{str.subview(0, str.find(';'))};
 }
+void TrimString(std::string &str){
+	while(str.ends_with(' ')){
+		str.pop_back();
+	}
+	while(str.starts_with(' ')){
+		str.erase(0, 1);
+	}
+}
 std::optional<std::pair<std::string, std::string>> ExtractCookieKvP(std::string_view str) {
 	std::pair<std::string, std::string> keyValue;
 
@@ -22,6 +30,9 @@ std::optional<std::pair<std::string, std::string>> ExtractCookieKvP(std::string_
 
 	auto valIt = str.find(';');
 	keyValue.second = std::string{str.subview(keyIt + 1, valIt)};
+
+	TrimString(keyValue.first);
+	TrimString(keyValue.second);
 
 	return keyValue;
 }
@@ -69,7 +80,13 @@ Cookie::Cookie(std::string_view rawCookie) {
                 httpOnly = true;
             }
 		}
-		rawCookie = rawCookie.subview(rawCookie.find(';') + 1);
+
+		auto delimIt = rawCookie.find(";");
+		if(delimIt == rawCookie.npos){
+			break;
+		}
+
+		rawCookie = rawCookie.subview(delimIt + 1);
 	}
 }
 std::string Cookie::Stringify() const {
