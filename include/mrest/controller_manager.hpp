@@ -67,7 +67,7 @@ class ControllerManager {
 							AnnotationPos<decltype(RequestBody)>(parameters_of(func));
 						constexpr int cookieIdx =
 							AnnotationPos<decltype(RequestCookies)>(parameters_of(func));
-							constexpr int sessionIdx =
+						constexpr int sessionIdx =
 							AnnotationPos<decltype(RequestSession)>(parameters_of(func));
 
 						constexpr auto params = define_static_array(parameters_of(func));
@@ -81,16 +81,16 @@ class ControllerManager {
 													  annotations_of(params[idx]))) {
 										if constexpr (SameAnnotation<RequestParam>(
 														  paramAnnotation)) {
+											constexpr auto annotationName = [:constant_of(paramAnnotation):].name.text;
 											queryIndices.emplace(
-												std::string{[:constant_of(paramAnnotation):]
-																.name.text},
+												std::string{annotationName ? annotationName : identifier_of(params[idx])},
 												idx);
 										}
 										if constexpr (SameAnnotation<PathVariable>(
 														  paramAnnotation)) {
+															constexpr auto annotationName = [:constant_of(paramAnnotation):].name.text;
 											pathVariables.emplace(
-												std::string{[:constant_of(paramAnnotation):]
-																.name.text},
+												std::string{annotationName ? annotationName : identifier_of(params[idx])},
 												idx);
 										}
 									}
@@ -183,8 +183,7 @@ class ControllerManager {
 					} else if constexpr (CookieIdx == idx) {
 						set.template operator()<idx>(request.header.cookies);
 						continue;
-					}
-					else if constexpr(SessionIdx == idx) {
+					} else if constexpr (SessionIdx == idx) {
 						set.template operator()<idx>(*request.session);
 						continue;
 					}

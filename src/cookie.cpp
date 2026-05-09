@@ -109,6 +109,9 @@ std::string Cookie::Stringify() const {
 	if (path) {
 		ss << "; Path=" << *path;
 	}
+	else{
+		ss << "; Path=*";
+	}
 	if (secure) {
 		ss << "; Secure";
 	}

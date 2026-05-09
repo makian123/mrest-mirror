@@ -51,8 +51,8 @@ class[[=RestController("/public")]] Controller {
 	}
 	[[=GetRequest("/info/{username}")]]
 	asio::awaitable<std::string> PathUserInfo([[=RequestBody]] const AuthRequestDto &body, 
-		[[=PathVariable("username")]] const std::string &username, 
-		[[=RequestParam("token")]] const std::string &token) const {
+		[[=PathVariable()]] const std::string &username, 
+		[[=RequestParam()]] const std::string &token) const {
 		if(!users.contains(username)){
 			throw BadRequestException("User not found");
 		}
