@@ -7,6 +7,7 @@
 #include "asio/io_context.hpp"
 #include "asio/ip/tcp.hpp"
 #include "controller_manager.hpp"
+#include "cors.hpp"
 #include "observer.hpp"
 #include "request.hpp"
 #include "request_interceptor.hpp"
@@ -15,8 +16,10 @@
 namespace mrest {
 class Server : public Observer {
    public:
+	Cors cors;
+
 	struct Config {
-		constexpr static std::uint64_t OneHourDuration = 60*60; // 60 secs * 60 min
+		constexpr static std::uint64_t OneHourDuration = 60 * 60;  // 60 secs * 60 min
 		std::string ip;
 		std::uint16_t port;
 		std::uint64_t sessionDuration{OneHourDuration};
@@ -52,6 +55,6 @@ class Server : public Observer {
 
 	void DoAccept();
 
-	std::optional<HttpSession*> GetSessionByUUID(std::string_view sessionId);
+	std::optional<HttpSession *> GetSessionByUUID(std::string_view sessionId);
 };
 }  // namespace mrest
