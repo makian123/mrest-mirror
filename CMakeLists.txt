@@ -15,12 +15,15 @@ FetchContent_Declare(
   GIT_TAG v7.5.0
   GIT_SHALLOW TRUE
 )
-
 FetchContent_MakeAvailable(glaze)
 
-add_library(asio INTERFACE)
-target_include_directories(asio INTERFACE ${CMAKE_SOURCE_DIR}/deps/asio-1.36.0/include)
-target_link_libraries(asio INTERFACE pthread)
+FetchContent_Declare(
+  asio
+  GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
+  GIT_TAG asio-1-36-0
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(asio)
 
 option(USE_EXAMPLE "Compile example subproject" ON)
 
