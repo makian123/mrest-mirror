@@ -1,7 +1,12 @@
 #include <annotations/controller.hpp>
 #include <annotations/request.hpp>
 #include <asio.hpp>
+#include <fstream>
+#include <glaze/core/opts.hpp>
+#include <glaze/core/read.hpp>
 #include <glaze/json/write.hpp>
+#include <glaze/toml/read.hpp>
+#include <iterator>
 #include <nlohmann/json_fwd.hpp>
 #include <print>
 #include <toml++/toml.hpp>
@@ -31,6 +36,12 @@ class[[=RestController("/public")]] Controller {
 	std::unordered_map<std::string, std::string> users;
 
    public:
+   struct Conf {
+		int value;
+		std::string valueStr;
+   };
+   [[=Configuration("testSection")]] Conf config;
+
 	Controller() = default;
 
 	[[=GetRequest("/info")]]
@@ -89,6 +100,7 @@ class[[=RestController("/public")]] Controller {
 		}
 
 		users.emplace(request.username, request.password);
+		std::println("Config value: {}, {}", config.value, config.valueStr);
 		co_return;
 	}
 };
@@ -108,6 +120,5 @@ int main() {
 
 	serv.Start();
 	io_context.run();
-
 	return 0;
 }
