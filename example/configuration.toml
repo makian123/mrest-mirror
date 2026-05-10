@@ -1,2 +1,7 @@
+[server]
 ip = "127.0.0.1"
 port = 8110
+
+[testSection]
+value = 123
+valueStr = "testValue"

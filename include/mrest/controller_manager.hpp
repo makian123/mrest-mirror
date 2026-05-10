@@ -4,8 +4,10 @@
 #include <any>
 #include <concepts>
 #include <exceptions/exceptions.hpp>
+#include <fstream>
 #include <functional>
 #include <glaze/glaze.hpp>
+#include <iterator>
 #include <memory>
 #include <meta>
 #include <nlohmann/detail/conversions/to_json.hpp>
@@ -31,6 +33,8 @@ class ControllerManager {
    public:
 	using RouteHandler = std::function<asio::awaitable<HttpResponse::BodyInfo>(HttpRequest &)>;
 
+	ControllerManager(std::string_view configPath) : configPath{configPath} {}
+
 	template <typename T, typename... Args>
 	// TODO: use reflection to extract all endpoint handlers
 	T &AddController(Args &&...args) {
@@ -55,6 +59,7 @@ class ControllerManager {
 			}
 		}
 
+		// Deal with params
 		template for (constexpr auto func :
 					  define_static_array(members_of(^^T, std::meta::access_context::current()))) {
 			if constexpr (has_identifier(func) && HasAnnotation<Request>(func)) {
@@ -81,16 +86,24 @@ class ControllerManager {
 													  annotations_of(params[idx]))) {
 										if constexpr (SameAnnotation<RequestParam>(
 														  paramAnnotation)) {
-											constexpr auto annotationName = [:constant_of(paramAnnotation):].name.text;
+											constexpr auto annotationName = [:constant_of(
+																				  paramAnnotation):]
+												.name.text;
 											queryIndices.emplace(
-												std::string{annotationName ? annotationName : identifier_of(params[idx])},
+												std::string{annotationName
+																? annotationName
+																: identifier_of(params[idx])},
 												idx);
 										}
 										if constexpr (SameAnnotation<PathVariable>(
 														  paramAnnotation)) {
-															constexpr auto annotationName = [:constant_of(paramAnnotation):].name.text;
+											constexpr auto annotationName = [:constant_of(
+																				  paramAnnotation):]
+												.name.text;
 											pathVariables.emplace(
-												std::string{annotationName ? annotationName : identifier_of(params[idx])},
+												std::string{annotationName
+																? annotationName
+																: identifier_of(params[idx])},
 												idx);
 										}
 									}
@@ -106,6 +119,39 @@ class ControllerManager {
 						routes.back()[metadata] = CreateHandler<sessionIdx, bodyIdx, cookieIdx>(
 							metadata.first, metadata.second, MakeFunction(*stored_ptr, &[:func:]),
 							queryIndices, pathVariables);
+					}
+				}
+			}
+		}
+
+		// Deal with configs
+		std::ifstream configFile{configPath};
+		std::string configValue{std::istreambuf_iterator<char>(configFile),
+								std::istreambuf_iterator<char>{}};
+		template for (constexpr auto member : define_static_array(
+						  nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+			if constexpr (HasAnnotation<Configuration>(member)) {
+				template for (constexpr auto memberAnnotation :
+							  define_static_array(annotations_of(member))) {
+					if constexpr (SameAnnotation<Configuration>(memberAnnotation)) {
+						struct TmpConfig;
+						consteval {
+							constexpr auto sectionName = [:constant_of(memberAnnotation):]
+								.sectionName.text;
+							define_aggregate(^^TmpConfig,
+											 {
+												 data_member_spec(remove_cvref(type_of(member)),
+																  {.name = sectionName})});
+						}
+						TmpConfig tmpCfg;
+						auto ec = glz::read<glz::opts{.format = glz::TOML,
+													  .error_on_unknown_keys = false}>(tmpCfg,
+																					   configValue);
+
+						stored_ptr->[:member:] = tmpCfg.[:std::meta::nonstatic_data_members_of(
+															  ^^TmpConfig,
+															  std::meta::access_context::current())
+															  [0]:];
 					}
 				}
 			}
@@ -145,6 +191,7 @@ class ControllerManager {
 
 	std::vector<std::any> controllers;
 	std::vector<std::unordered_map<RouteMetadata, RouteHandler, HashPair>> routes;
+	std::string configPath;
 
 	bool MatchRoute(std::string_view pattern, std::string_view path) const;
 

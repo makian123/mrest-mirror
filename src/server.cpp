@@ -14,12 +14,13 @@
 #include "asio/awaitable.hpp"
 #include "asio/ip/address_v4.hpp"
 #include "asio/ip/tcp.hpp"
+#include "controller_manager.hpp"
 #include "exceptions/bad_request.hpp"
 #include "request.hpp"
 #include "tcp_connection.hpp"
 
 namespace mrest {
-Server::Server(asio::io_context &io_context, std::string_view configPath) : acceptor(io_context) {
+Server::Server(asio::io_context &io_context, std::string_view configPath) : acceptor(io_context), controllers(configPath) {
 	this->context = &io_context;
 
 	if (!std::filesystem::exists(configPath)) {
@@ -29,10 +30,18 @@ Server::Server(asio::io_context &io_context, std::string_view configPath) : acce
 	std::ifstream file{std::filesystem::path{configPath}};
 	std::string fileData{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
 
-	if (auto err = glz::read_toml<Config>(config, fileData); err) {
+	struct ServerConfWrapper {
+		Server::Config server;
+	};
+	ServerConfWrapper wrapper;
+
+	if (auto err = glz::read<glz::opts{.format = glz::TOML,
+		.error_on_unknown_keys = false}>(wrapper, fileData); err) {
 		std::println("Error reading toml: {}", glz::format_error(err, fileData));
 		throw std::exception();
 	}
+
+	config = wrapper.server;
 }
 
 void Server::Start() {
