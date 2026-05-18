@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "cookie.hpp"
@@ -26,6 +27,16 @@ struct MultipartParam {
 							   [partName](const Resource &part) { return part.name == partName; });
 
 		return (it != parts.end()) ? std::optional(&(*it)) : std::nullopt;
+	}
+
+	std::size_t GetTotalSize() const {
+		std::size_t ret{0};
+
+		for(const auto &part: parts){
+			ret += part.data.size();
+		}
+
+		return ret;
 	}
 };
 
@@ -111,9 +122,24 @@ struct HttpRequest {
 			Multipart_Mixed
 		};
 
-		std::string body;
 		Type type = Type::JSON;
-		MultipartParam multipartData;
+		std::variant<std::string, MultipartParam, Resource> value;
+
+		std::size_t GetSize() const {
+			return std::visit([](auto &&arg) -> std::size_t {
+				using T = std::decay_t<decltype(arg)>;
+
+				if constexpr(std::is_same_v<T, std::string>){
+					return arg.size();
+				}
+				else if constexpr(std::is_same_v<T, MultipartParam>){
+					return arg.GetTotalSize();
+				}
+				else {
+					return arg.data.size();
+				}
+			}, value);
+		}
 	} body;
 	HttpSession *session{nullptr};
 
