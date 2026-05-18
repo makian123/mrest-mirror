@@ -171,6 +171,10 @@ HttpHeader::HttpHeader(std::span<const char> rawRequest) {
 
 		headers[ToLowercase(key)] = std::string{value};
 	}
+	// Make sure to set no content length for empty bodies
+	if(!headers.contains("content-length")){
+		headers["content-length"] = "0";
+	}
 
 	// Parameter trimming
 	auto paramStartIt = path.find('?');
