@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <optional>
 #include <random>
@@ -11,16 +12,36 @@
 #include "cookie.hpp"
 
 namespace mrest {
+struct Resource {
+	std::string name;
+	std::vector<char> data;
+	std::optional<std::string> filename;
+	std::optional<std::string> contentType;
+};
+struct MultipartParam {
+	std::vector<Resource> parts;
+
+	std::optional<const Resource *> GetPart(std::string_view partName) const {
+		auto it = std::find_if(parts.begin(), parts.end(),
+							   [partName](const Resource &part) { return part.name == partName; });
+
+		return (it != parts.end()) ? std::optional(&(*it)) : std::nullopt;
+	}
+};
+
 class HttpSession {
 	std::string id;
+	int connId;
 	std::unordered_map<std::string, std::string> attributes;
 
 	std::chrono::system_clock::time_point creationTime;
 	std::chrono::seconds expirationDuration;
 
    public:
-	explicit HttpSession(std::int64_t expirationTimeSeconds = 0)
+	HttpSession() = default;
+	HttpSession(int connId, std::int64_t expirationTimeSeconds = 0)
 		: id(' ', 32),
+		  connId{connId},
 		  creationTime{std::chrono::system_clock::now()},
 		  expirationDuration{expirationTimeSeconds} {
 		const std::string_view characters = "0123456789ABCDEF";
@@ -34,6 +55,7 @@ class HttpSession {
 	}
 	HttpSession(const HttpSession &other)
 		: id{other.id},
+		  connId{other.connId},
 		  attributes{other.attributes},
 		  creationTime{other.creationTime},
 		  expirationDuration{other.expirationDuration} {}
@@ -49,6 +71,7 @@ class HttpSession {
 	}
 
 	std::string_view GetId() const { return id; }
+	int GetConnectionId() const { return connId; }
 
 	operator bool() const {
 		if (expirationDuration.count() == 0) {
@@ -67,9 +90,10 @@ struct HttpHeader {
 	std::unordered_map<std::string, std::string> headers;
 	std::unordered_map<std::string, std::string> parameters;
 	CookieContainer cookies;
+	std::string boundary{};
 
 	HttpHeader() = default;
-	explicit HttpHeader(const std::string &rawRequest);
+	explicit HttpHeader(std::span<const char> rawRequest);
 
 	std::string Stringify() const;
 };
@@ -83,20 +107,29 @@ struct HttpRequest {
 			HTML,
 			Javascript,
 			Bytes,
+			Multipart_FormData,
+			Multipart_Mixed
 		};
 
 		std::string body;
 		Type type = Type::JSON;
+		MultipartParam multipartData;
 	} body;
 	HttpSession *session{nullptr};
 
 	HttpRequest() = default;
-	explicit HttpRequest(const std::string &rawRequest);
-	HttpRequest(HttpSession &session, const std::string &rawRequest);
+	explicit HttpRequest(std::span<const char> rawRequest);
+	HttpRequest(HttpSession &session, std::span<const char> rawRequest);
+	HttpRequest(HttpSession &session, const HttpHeader &header, std::span<const char> rawBody);
+	HttpRequest(const HttpRequest &other) = default;
 
 	std::string Stringify() const;
 
 	static HttpRequest BadRequest(std::string_view message = "");
+	static HttpRequest Ok(std::string_view message = "");
+
+   private:
+	BodyInfo ParseBody(std::span<const char> body) const;
 };
 // Possible better ways to do this
 using HttpResponse = HttpRequest;

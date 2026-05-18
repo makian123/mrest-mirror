@@ -1,5 +1,6 @@
 #include <cctype>
 #include <chrono>
+#include <iterator>
 #include <optional>
 #include <print>
 #include <ranges>
@@ -7,6 +8,7 @@
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
+#include <util/search.hpp>
 #include <vector>
 
 namespace {
@@ -17,7 +19,7 @@ std::string_view Trim(std::string_view sv) {
 	while (start < end && isspace(sv[start])) ++start;
 	while (end > start && isspace(sv[end - 1])) --end;
 
-	return sv.substr(start, end - start);
+	return sv.subview(start, end - start);
 }
 std::string &ToLowercase(std::string &str) {
 	for (auto &ch : str) {
@@ -53,20 +55,91 @@ const std::unordered_map<BodyType, std::string> bodyTypes{
 	{BodyType::CSS, "text/css"},
 	{BodyType::HTML, "text/html"},
 	{BodyType::Javascript, "text/javascript"},
-	{BodyType::Bytes, "application/octet-stream"}
+	{BodyType::Bytes, "application/octet-stream"},
+	{BodyType::Multipart_FormData, "multipart/form-data"},
+	{BodyType::Multipart_Mixed, "multipart/mixed"}};
 
-};
+std::vector<mrest::Resource> ExtractMultiparts(std::string_view boundary,
+											   std::span<const char> data) {
+	std::vector<mrest::Resource> parts;
+	auto boundaryIt = mrest::util::SearchSubstring(data, boundary);
+	while (boundaryIt != data.end()) {
+		if (*(boundaryIt + 1) == '-' && *(boundaryIt + boundary.length() + 2) == '-') {
+			break;
+		}
+		mrest::Resource part{};
+
+		auto nextBoundary = mrest::util::SearchSubstring(data, boundary, boundaryIt + 1);
+		auto partFull = Trim(std::string_view{boundaryIt + boundary.length(), nextBoundary - 2});
+		if (partFull.empty()) {
+			break;
+		}
+
+		auto firstLine = Trim(partFull.subview(0, partFull.find("\n")));
+		partFull = partFull.subview(partFull.find("\n") + 1);
+
+		auto secondLine = Trim(partFull.subview(0, partFull.find("\n")));
+
+		auto bodyIt = partFull.find("\r\n\r\n");
+		if (bodyIt != partFull.npos) {
+			partFull = partFull.subview(bodyIt + 4);
+		}
+
+		std::string_view &contentType =
+			firstLine.starts_with("Content-Type") ? firstLine : secondLine;
+		std::string_view &contentDisposition =
+			firstLine.starts_with("Content-Disposition") ? firstLine : secondLine;
+
+		if (contentType.starts_with("Content-Type")) {
+			part.contentType = contentType.substr(contentType.find(": ") + 2);
+		}
+
+		std::vector<std::string_view> segments =
+			SplitString(contentDisposition.subview(contentDisposition.find(": ") + 2), ';');
+		for (auto &segment : segments) {
+			std::vector<std::string_view> keyValue = SplitString(Trim(segment), '=');
+			if (keyValue.size() != 2 || keyValue[1].size() <= 2) {
+				continue;
+			}
+
+			std::string_view view = keyValue[1];
+			// convert \"text\" -> text
+			if(view.starts_with('"') && view.ends_with('"')){
+				view = view.subview(1, keyValue[1].size() - 2);
+			}
+
+			if (keyValue[0] == "name") {
+				part.name = view;
+			} else if (keyValue[0] == "filename") {
+				part.filename = view;
+			}
+		}
+
+		const auto len = partFull.length();
+		part.data.resize(partFull.length());
+		partFull.copy(part.data.data(), partFull.length());
+
+		parts.push_back(part);
+		boundaryIt = nextBoundary;
+	}
+
+	return parts;
+}
 }  // namespace
 
 namespace mrest {
-HttpHeader::HttpHeader(const std::string &rawRequest) {
-	std::istringstream stream{rawRequest};
+HttpHeader::HttpHeader(std::span<const char> rawRequest) {
+	std::string headerPart{rawRequest.begin(), util::SearchSubstring(rawRequest, "\r\n\r\n")};
+	std::istringstream stream{headerPart};
 	std::string line;
 
 	stream >> method >> path >> version;
 
 	// Deal with headers
 	while (std::getline(stream, line)) {
+		if (line.ends_with("\r\n\r")) {
+			break;
+		}
 		if (!line.empty() && line.back() == '\r') {
 			line.pop_back();
 		}
@@ -87,6 +160,13 @@ HttpHeader::HttpHeader(const std::string &rawRequest) {
 		if (key == "Cookie" || key == "Set-Cookie") {
 			cookies.AddCookie(Cookie{value});
 			continue;
+		}
+
+		// Multipart format: "Content-Type: multipart/XYZ; boundary=..."
+		if (key == "Content-Type" && value.starts_with("multipart")) {
+			auto boundaryIt = value.find("boundary=");
+			boundary = value.substr(boundaryIt + sizeof("boundary=") - 1);
+			value.erase(boundaryIt - 2);
 		}
 
 		headers[ToLowercase(key)] = std::string{value};
@@ -124,13 +204,13 @@ std::string HttpHeader::Stringify() const {
 
 		if (parameters.size()) {
 			ss << '?';
-		}
-		auto paramsEnd = std::prev(parameters.end());
-		for (auto it = parameters.begin(); it != parameters.end(); ++it) {
-			ss << it->first << ' ' << it->second;
+			auto paramsEnd = std::prev(parameters.end());
+			for (auto it = parameters.begin(); it != parameters.end(); ++it) {
+				ss << it->first << ' ' << it->second;
 
-			if (it != paramsEnd) {
-				ss << '&';
+				if (it != paramsEnd) {
+					ss << '&';
+				}
 			}
 		}
 
@@ -145,36 +225,30 @@ std::string HttpHeader::Stringify() const {
 		ss << key << ": " << value << "\r\n";
 	}
 
-	for(auto &cookie: cookies.GetAllCookies()) {
+	for (auto &cookie : cookies.GetAllCookies()) {
 		ss << cookieHeaderKey << ": " << cookie.Stringify() << "\r\n";
 	}
 
 	return ss.str();
 }
 
-HttpRequest::HttpRequest(const std::string &rawRequest) : header{rawRequest} {
-	auto bodyIt = rawRequest.find("\r\n\r\n");
-	if (bodyIt == std::string::npos) {
+HttpRequest::HttpRequest(std::span<const char> rawRequest) : header{rawRequest} {
+	std::println("Request received: {}", rawRequest.data());
+	auto bodyIt = util::SearchSubstring(rawRequest, "\r\n\r\n");
+	if (bodyIt == rawRequest.end()) {
 		return;
 	}
 
-	if (header.headers.contains("content-type")) {
-		auto contentType = header.headers["content-type"];
-		BodyType type;
-		for (const auto &[bodyType, value] : bodyTypes) {
-			if (value == contentType) {
-				type = bodyType;
-				break;
-			}
-		}
-
-		body = BodyInfo{std::string{rawRequest.begin() + bodyIt + 2, rawRequest.end()}, type};
-	}
+	this->body = ParseBody(rawRequest.subspan(std::distance(rawRequest.begin(), bodyIt)));
 }
-HttpRequest::HttpRequest(HttpSession &session, const std::string &rawRequest)
+HttpRequest::HttpRequest(HttpSession &session, std::span<const char> rawRequest)
 	: HttpRequest(rawRequest) {
 	this->session = &session;
 }
+HttpRequest::HttpRequest(HttpSession &session, const HttpHeader &header,
+						 std::span<const char> rawBody)
+	: session(&session), header(header), body(ParseBody(rawBody)) {}
+
 std::string HttpRequest::Stringify() const {
 	std::stringstream ss;
 	ss << header.Stringify();
@@ -194,8 +268,20 @@ HttpRequest HttpRequest::BadRequest(std::string_view msg) {
 	HttpRequest ret;
 	ret.header.statusCode = "400 BAD REQUEST";
 	ret.header.headers["Connection"] = "close";
-	ret.body = {std::string{msg}, BodyType::PlainText};
+	if (!msg.empty()) {
+		ret.body = {std::string{msg}, BodyType::PlainText};
+	}
 
+	return ret;
+}
+
+HttpRequest HttpRequest::Ok(std::string_view msg) {
+	HttpRequest ret;
+	ret.header.statusCode = "200 OK";
+	ret.header.headers["Connection"] = "close";
+	if (!msg.empty()) {
+		ret.body = {std::string{msg}, BodyType::PlainText};
+	}
 	return ret;
 }
 
@@ -221,5 +307,29 @@ std::optional<std::string> ExtractPathVariable(std::string_view pattern, std::st
 	}
 
 	return std::nullopt;
+}
+
+HttpRequest::BodyInfo HttpRequest::ParseBody(std::span<const char> body) const {
+	HttpRequest::BodyInfo retBody;
+	if (header.headers.contains("content-type")) {
+		auto contentType = header.headers.at("content-type");
+
+		BodyType type;
+		for (const auto &[bodyType, value] : bodyTypes) {
+			if (value == contentType) {
+				type = bodyType;
+				break;
+			}
+		}
+
+		if (type == BodyType::Multipart_FormData || type == BodyType::Multipart_Mixed) {
+			auto multiparts = ExtractMultiparts(header.boundary, body);
+			retBody = BodyInfo{"", type, MultipartParam{multiparts}};
+		} else {
+			retBody = BodyInfo{std::string{body.begin(), body.end()}, type};
+		}
+	}
+
+	return retBody;
 }
 }  // namespace mrest

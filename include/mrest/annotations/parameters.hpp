@@ -1,5 +1,6 @@
 #pragma once
 
+#include "request.hpp"
 #include "util/reflection.hpp"
 
 namespace mrest {
@@ -26,6 +27,13 @@ struct PathVariable {
 
 	consteval PathVariable() = default;
 	consteval explicit PathVariable(std::string_view name) : name(name) {}
+};
+
+struct RequestPart{
+	util::StringLiteral name;
+
+	consteval RequestPart() = default;
+	consteval explicit RequestPart(std::string_view name) : name(name) {}
 };
 }  // namespace annotation
 }  // namespace mrest

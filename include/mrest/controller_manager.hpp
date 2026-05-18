@@ -68,6 +68,7 @@ class ControllerManager {
 					if constexpr (SameAnnotation<Request>(annotation)) {
 						std::unordered_map<std::string, int> queryIndices;
 						std::unordered_map<std::string, int> pathVariables;
+						std::unordered_map<std::string, int> multiparts;
 						constexpr int bodyIdx =
 							AnnotationPos<decltype(RequestBody)>(parameters_of(func));
 						constexpr int cookieIdx =
@@ -80,27 +81,31 @@ class ControllerManager {
 							template for (constexpr auto idx : make_index_array(
 											  std::make_index_sequence<params.size()>{})) {
 								if constexpr (HasAnnotation<RequestParam>(params[idx]) ||
-											  HasAnnotation<PathVariable>(params[idx])) {
+											  HasAnnotation<PathVariable>(params[idx]) ||
+											  HasAnnotation<RequestPart>(params[idx])) {
 									template for (constexpr auto paramAnnotation :
 												  define_static_array(
 													  annotations_of(params[idx]))) {
+										constexpr auto annotationName = [:constant_of(
+																			  paramAnnotation):]
+											.name.text;
 										if constexpr (SameAnnotation<RequestParam>(
 														  paramAnnotation)) {
-											constexpr auto annotationName = [:constant_of(
-																				  paramAnnotation):]
-												.name.text;
 											queryIndices.emplace(
 												std::string{annotationName
 																? annotationName
 																: identifier_of(params[idx])},
 												idx);
-										}
-										if constexpr (SameAnnotation<PathVariable>(
-														  paramAnnotation)) {
-											constexpr auto annotationName = [:constant_of(
-																				  paramAnnotation):]
-												.name.text;
+										} else if constexpr (SameAnnotation<PathVariable>(
+																 paramAnnotation)) {
 											pathVariables.emplace(
+												std::string{annotationName
+																? annotationName
+																: identifier_of(params[idx])},
+												idx);
+										} else if constexpr (SameAnnotation<RequestPart>(
+																 paramAnnotation)) {
+											multiparts.emplace(
 												std::string{annotationName
 																? annotationName
 																: identifier_of(params[idx])},
@@ -118,7 +123,7 @@ class ControllerManager {
 
 						routes.back()[metadata] = CreateHandler<sessionIdx, bodyIdx, cookieIdx>(
 							metadata.first, metadata.second, MakeFunction(*stored_ptr, &[:func:]),
-							queryIndices, pathVariables);
+							queryIndices, pathVariables, multiparts);
 					}
 				}
 			}
@@ -206,7 +211,8 @@ class ControllerManager {
 	RouteHandler CreateHandler(std::string_view requestMethod, const std::string &requestPattern,
 							   std::function<R(Args...)> method,
 							   const std::unordered_map<std::string, int> &queryIndices,
-							   const std::unordered_map<std::string, int> &pathVariables) {
+							   const std::unordered_map<std::string, int> &pathVariables,
+							   const std::unordered_map<std::string, int> &multiparts) {
 		using namespace mrest::annotation;
 		using namespace mrest::util;
 		std::string pattern{requestPattern};
@@ -270,6 +276,22 @@ class ControllerManager {
 												 std::remove_cvref_t<Args...[idx]>>) {
 							set.template operator()<idx>(
 								StringTo<std::remove_cvref_t<Args...[idx]>>(*extractedPathVar));
+						}
+						continue;
+					}
+
+					auto partIt = std::find_if(multiparts.begin(), multiparts.end(),
+											   [](const std::pair<std::string, int> &multipart) {
+												   return multipart.second == idx;
+											   });
+					if (partIt != multiparts.end()) {
+						if constexpr (std::is_same_v<std::remove_cvref_t<Args...[idx]>,
+													 mrest::Resource>) {
+							const auto &multipartContainer = request.body.multipartData;
+							const auto partKey = partIt->first;
+							std::optional<const mrest::Resource *> multipartResource =
+								multipartContainer.GetPart(partIt->first);
+							set.template operator()<idx>(**multipartResource);
 						}
 						continue;
 					}

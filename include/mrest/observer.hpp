@@ -9,8 +9,7 @@ namespace mrest {
 struct Observer {
 	asio::io_context *context;
 
-	virtual asio::awaitable<void> OnReceived(int connectionId, const char *data,
-											 const std::size_t size) {
+	virtual asio::awaitable<void> OnReceived(int connectionId, const std::vector<char> &data) {
 		co_return;
 	}
 	virtual asio::awaitable<void> OnConnectionClosed(int connectionId) { co_return; }

@@ -7,6 +7,8 @@
 #include <print>
 
 #include "asio/awaitable.hpp"
+#include "asio/buffer.hpp"
+#include "asio/buffers_iterator.hpp"
 #include "asio/co_spawn.hpp"
 #include "asio/detached.hpp"
 #include "asio/io_context.hpp"
@@ -15,8 +17,7 @@
 
 namespace mrest {
 TcpConnection::TcpConnection(asio::ip::tcp::socket &&sock, Observer &observer, int id)
-	: socket{std::move(sock)}, observer{observer}, id{id} {
-	}
+	: socket{std::move(sock)}, observer{observer}, id{id} {}
 
 std::shared_ptr<TcpConnection> TcpConnection::create(asio::ip::tcp::socket &&socket,
 													 Observer &observer, int id) {
@@ -48,18 +49,21 @@ void TcpConnection::close() {
 }
 
 asio::awaitable<void> TcpConnection::doRead() {
-	auto buffers{readBuf.prepare(1024)};
-	auto self{shared_from_this()};
-
 	while (true) {
 		std::size_t bytesTransferred =
 			co_await socket.async_read_some(readBuf.prepare(1024), asio::use_awaitable);
-
 		readBuf.commit(bytesTransferred);
-		co_await observer.OnReceived(id, static_cast<const char *>(readBuf.data().data()),
-									 bytesTransferred);
 
-		readBuf.consume(1024);
+		auto buffBegin = asio::buffers_begin(readBuf.data());
+		buffer.insert(buffer.end(), buffBegin, buffBegin + bytesTransferred);
+
+		co_await observer.OnReceived(id, buffer);
+
+		if (!keepAppending) {
+			buffer.clear();
+		}
+
+		readBuf.consume(bytesTransferred);
 	}
 	co_return;
 }
