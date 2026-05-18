@@ -228,9 +228,9 @@ class ControllerManager {
 				template for (constexpr auto idx :
 							  make_index_array(std::make_index_sequence<sizeof...(Args)>{})) {
 					if constexpr (BodyIdx == idx) {
-						auto body =
-							glz::read_json<std::remove_cvref_t<Args...[idx]>>(request.body.body)
-								.value();
+						auto body = glz::read_json<std::remove_cvref_t<Args...[idx]>>(
+										std::get<std::string>(request.body.value))
+										.value();
 						set.template operator()<idx>(body);
 						continue;
 					} else if constexpr (CookieIdx == idx) {
@@ -287,7 +287,8 @@ class ControllerManager {
 					if (partIt != multiparts.end()) {
 						if constexpr (std::is_same_v<std::remove_cvref_t<Args...[idx]>,
 													 mrest::Resource>) {
-							const auto &multipartContainer = request.body.multipartData;
+							const auto &multipartContainer =
+								std::get<MultipartParam>(request.body.value);
 							const auto partKey = partIt->first;
 							std::optional<const mrest::Resource *> multipartResource =
 								multipartContainer.GetPart(partIt->first);
@@ -312,14 +313,17 @@ class ControllerManager {
 					retVal = co_await method();
 
 				if constexpr (std::is_convertible_v<RetType, std::string>) {
-					co_return HttpResponse::BodyInfo{std::string{retVal},
-													 HttpResponse::BodyInfo::Type::PlainText};
+					co_return HttpResponse::BodyInfo{HttpResponse::BodyInfo::Type::PlainText,
+													 std::string{retVal}};
 				} else if constexpr (HasToString<RetType>) {
-					co_return HttpResponse::BodyInfo{std::to_string(retVal),
-													 HttpResponse::BodyInfo::Type::PlainText};
+					co_return HttpResponse::BodyInfo{HttpResponse::BodyInfo::Type::PlainText,
+													 std::to_string(retVal)};
+				} else if constexpr (std::is_same_v<RetType, Resource>) {
+					//TODO: use resource type instead of hardcoding bytes
+					co_return HttpResponse::BodyInfo{HttpResponse::BodyInfo::Type::Bytes, retVal};
 				} else {
-					co_return HttpResponse::BodyInfo{glz::write_json(retVal).value(),
-													 HttpResponse::BodyInfo::Type::JSON};
+					co_return HttpResponse::BodyInfo{HttpResponse::BodyInfo::Type::JSON,
+													 glz::write_json(retVal).value()};
 				}
 			}
 

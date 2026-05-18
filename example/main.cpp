@@ -105,12 +105,13 @@ class[[=RestController("/public")]] Controller {
 	}
 
 	[[=PostRequest("/multipart-test")]]
-	asio::awaitable<void> FileTest([[=RequestPart("dataParam")]] const mrest::Resource &param){
+	asio::awaitable<mrest::Resource> FileTest([[=RequestPart("dataParam")]] const mrest::Resource &param){
 		for(auto ch: param.data){
 			std::print("{}", ch);
 		}
 		std::println();
-		co_return;
+
+		co_return param;
 	}
 };
 

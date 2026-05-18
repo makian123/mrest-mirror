@@ -104,7 +104,7 @@ std::vector<mrest::Resource> ExtractMultiparts(std::string_view boundary,
 
 			std::string_view view = keyValue[1];
 			// convert \"text\" -> text
-			if(view.starts_with('"') && view.ends_with('"')){
+			if (view.starts_with('"') && view.ends_with('"')) {
 				view = view.subview(1, keyValue[1].size() - 2);
 			}
 
@@ -253,10 +253,29 @@ std::string HttpRequest::Stringify() const {
 	std::stringstream ss;
 	ss << header.Stringify();
 
-	ss << "content-length: " << body.body.size() << "\r\n";
-	if (!body.body.empty()) {
+	const auto bodySize = body.GetSize();
+	ss << "content-length: " << bodySize << "\r\n";
+
+	if (bodySize) {
 		ss << std::format("content-type: {}\r\n", bodyTypes.at(body.type));
-		ss << "\r\n" << body.body;
+		std::visit([&ss, &bodySize](auto &&arg) {
+			using T = std::decay_t<decltype(arg)>;
+
+			if constexpr(std::is_same_v<T, std::string>){
+				ss << "\r\n" << arg;
+			}
+			else if constexpr(std::is_same_v<T, MultipartParam>){
+				// Todo: multipart
+			}
+			else {
+				ss << "content-disposition: attachment";
+				if(arg.filename){
+					ss << "; filename=\"" << *arg.filename << '"';
+				}
+				ss << "\r\n\r\n";
+				ss.write(arg.data.data(), bodySize);
+			}
+		}, body.value);
 	} else {
 		ss << "\r\n";
 	}
@@ -269,7 +288,7 @@ HttpRequest HttpRequest::BadRequest(std::string_view msg) {
 	ret.header.statusCode = "400 BAD REQUEST";
 	ret.header.headers["Connection"] = "close";
 	if (!msg.empty()) {
-		ret.body = {std::string{msg}, BodyType::PlainText};
+		ret.body = {BodyType::PlainText, std::string{msg}};
 	}
 
 	return ret;
@@ -280,7 +299,7 @@ HttpRequest HttpRequest::Ok(std::string_view msg) {
 	ret.header.statusCode = "200 OK";
 	ret.header.headers["Connection"] = "close";
 	if (!msg.empty()) {
-		ret.body = {std::string{msg}, BodyType::PlainText};
+		ret.body = {BodyType::PlainText, std::string{msg}};
 	}
 	return ret;
 }
@@ -324,9 +343,9 @@ HttpRequest::BodyInfo HttpRequest::ParseBody(std::span<const char> body) const {
 
 		if (type == BodyType::Multipart_FormData || type == BodyType::Multipart_Mixed) {
 			auto multiparts = ExtractMultiparts(header.boundary, body);
-			retBody = BodyInfo{"", type, MultipartParam{multiparts}};
+			retBody = BodyInfo{type, MultipartParam{multiparts}};
 		} else {
-			retBody = BodyInfo{std::string{body.begin(), body.end()}, type};
+			retBody = BodyInfo{type, std::string{body.begin(), body.end()}};
 		}
 	}
 
