@@ -5,7 +5,7 @@
 
 #include "request.hpp"
 
-namespace mrest{
+namespace mrest {
 class FilterChain {
    public:
 	/** Requires all the filters to return true to allow a request.
@@ -19,9 +19,7 @@ class FilterChain {
 	FilterMethod filterMethod;
 	std::unique_ptr<FilterChain> next{nullptr};
 
-	bool DoNext(HttpRequest &request) const {
-		return next ? next->Filter(request) : true;
-	}
+	bool DoNext(HttpRequest &request) const { return next ? next->Filter(request) : true; }
 
    public:
 	FilterChain() = default;
@@ -43,4 +41,23 @@ class FilterChain {
 		next = std::make_unique<FilterChain>(method);
 	}
 };
-}
+class Preprocessors {
+   public:
+	using PreHandler = std::function<bool(HttpRequest &request)>;
+	void AddBack(PreHandler handler) { preprocessors.push_back(handler); }
+
+	// Returns true if ran successfully
+	bool Process(HttpRequest &request) const {
+		for (auto &handler : preprocessors) {
+			if (!handler(request)) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+   private:
+	std::vector<PreHandler> preprocessors;
+};
+}  // namespace mrest

@@ -10,6 +10,8 @@
 #include <iterator>
 #include <memory>
 #include <print>
+#include <ranges>
+#include <string>
 
 #include "asio/awaitable.hpp"
 #include "asio/ip/address_v4.hpp"
@@ -18,9 +20,11 @@
 #include "exceptions/bad_request.hpp"
 #include "request.hpp"
 #include "tcp_connection.hpp"
+#include "util/search.hpp"
 
 namespace mrest {
-Server::Server(asio::io_context &io_context, std::string_view configPath) : acceptor(io_context), controllers(configPath) {
+Server::Server(asio::io_context &io_context, std::string_view configPath)
+	: acceptor(io_context), controllers(configPath) {
 	this->context = &io_context;
 
 	if (!std::filesystem::exists(configPath)) {
@@ -35,8 +39,9 @@ Server::Server(asio::io_context &io_context, std::string_view configPath) : acce
 	};
 	ServerConfWrapper wrapper;
 
-	if (auto err = glz::read<glz::opts{.format = glz::TOML,
-		.error_on_unknown_keys = false}>(wrapper, fileData); err) {
+	if (auto err = glz::read<glz::opts{.format = glz::TOML, .error_on_unknown_keys = false}>(
+			wrapper, fileData);
+		err) {
 		std::println("Error reading toml: {}", glz::format_error(err, fileData));
 		throw std::exception();
 	}
@@ -94,6 +99,10 @@ void Server::Send(int connectionId, const char *data, std::size_t size) {
 		it->second->send(data, size);
 	}
 }
+void Server::Send(int connectionId, const HttpResponse &response) {
+	std::string stringified = response.Stringify();
+	Send(connectionId, stringified.c_str(), stringified.size());
+}
 void Server::Disconnect(int connectionId) {
 	auto it =
 		std::find_if(connections.begin(), connections.end(),
@@ -117,14 +126,28 @@ std::optional<HttpSession *> Server::GetSessionByUUID(std::string_view sessionId
 	return it != sessions.end() ? std::optional(&it->second) : std::nullopt;
 }
 
-asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
-										 const std::size_t size) {
+asio::awaitable<void> Server::OnReceived(int connectionId, const std::vector<char> &data) {
+	TcpConnection &conn = *connections.at(connectionId).get();
 	std::string exceptionMsg;
 	HttpSession *connSession{nullptr};
 	if (sessions.contains(connectionId)) {
 		connSession = &sessions.at(connectionId);
 	}
-	HttpRequest request{*connSession, std::string(data, data + size)};
+
+	// Deal with multipart
+	std::span<const char> requestView{data};
+	HttpHeader header{requestView};
+	std::size_t bodyLen = std::stoull(header.headers["content-length"]);
+	auto bodyStart = util::SearchSubstring(requestView, "\r\n\r\n") + 4;
+	auto bodyReceivedLen = std::distance(bodyStart, requestView.end());
+	if (bodyReceivedLen < bodyLen) {
+		conn.SetAppending(true);
+		co_return;
+	}
+	conn.SetAppending(false);
+	
+	HttpRequest request{*connSession, header,
+						requestView.subspan(std::distance(requestView.begin(), bodyStart))};
 
 	// Check if session cookie exists
 	bool appendSessionCookie{true};
@@ -140,24 +163,28 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
 			appendSessionCookie = false;
 		}
 	}
-	if(!request.session) {
-		sessions.emplace(connectionId, HttpSession(3600));
+	if (!request.session) {
+		sessions.emplace(connectionId, HttpSession(connectionId, 3600));
 		request.session = &sessions.at(connectionId);
 	}
 
 	if (!request.session) {
 		exceptionMsg = "Session does not exist";
 	}
-	if(request.header.method == "OPTIONS"){
+
+	if (!preprocessors.Process(request)) {
+		co_return;
+	}
+
+	if (request.header.method == "OPTIONS") {
 		HttpResponse response;
 		response.header.statusCode = "200 OK";
 		response.session = request.session;
 		cors.AppendToResponse(response);
 
-		std::string stringified = response.Stringify();
 		request.body.type = HttpRequest::BodyInfo::Type::PlainText;
 
-		Send(connectionId, stringified.c_str(), stringified.size());
+		Send(connectionId, response);
 
 		co_return;
 	}
@@ -184,8 +211,7 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
 			}
 			cors.AppendToResponse(response);
 
-			std::string stringified = response.Stringify();
-			Send(connectionId, stringified.c_str(), stringified.size());
+			Send(connectionId, response);
 
 			co_return;
 		} catch (std::exception &e) {
@@ -201,9 +227,7 @@ asio::awaitable<void> Server::OnReceived(int connectionId, const char *data,
 			Cookie{std::string{config.sessionCookieName}, std::string{request.session->GetId()}});
 	}
 
-	auto stringified = response.Stringify();
-
-	Send(connectionId, stringified.c_str(), stringified.size());
+	Send(connectionId, response);
 	Disconnect(connectionId);
 	co_return;
 }

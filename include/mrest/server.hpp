@@ -32,18 +32,20 @@ class Server : public Observer {
 	~Server() { Stop(); }
 
 	void AddFilter(FilterChain::FilterMethod method) { filter.AddBack(method); }
+	void AddPreprocessor(Preprocessors::PreHandler handler) { preprocessors.AddBack(handler); }
 
 	void Start();
 	void Stop();
 
+	void Send(int connectionId, const HttpResponse &response);
 	void Send(int connectionId, const char *data, std::size_t size);
 	void Disconnect(int connectionId);
 
-	asio::awaitable<void> OnReceived(int connectionId, const char *data,
-									 const std::size_t size) override;
+	asio::awaitable<void> OnReceived(int connectionId, const std::vector<char> &data) override;
 
    private:
 	FilterChain filter;
+	Preprocessors preprocessors;
 	asio::ip::tcp::acceptor acceptor;
 
 	std::unordered_map<int, std::shared_ptr<TcpConnection>> connections;
